@@ -61,7 +61,7 @@ graph TD
     ui -->|2. Submit Report| api
     api -->|3. Store Data| db
     api -->|4. Request Analysis| ai
-    ai -->|5. Verification >70%| api
+    ai -->|5. "Verification >70%"| api
     api -->|6. Verified? Mint NFT| chain
     api -->|7. Notify User| alert
     alert -->|8. Push Notification| user
