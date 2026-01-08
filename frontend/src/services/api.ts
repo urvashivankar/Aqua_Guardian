@@ -322,6 +322,20 @@ export const fetchReportDiscussions = async (report_id: string) => {
     }
 };
 
+export const addReportDiscussion = async (report_id: string, formData: FormData) => {
+    try {
+        const response = await api.post(`/reports/${report_id}/discussions`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error adding discussion:', error);
+        throw error;
+    }
+};
+
 export const fetchLeaderboard = async () => {
     try {
         const response = await api.get('/gamification/leaderboard');
