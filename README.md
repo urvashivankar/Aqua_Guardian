@@ -337,7 +337,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## 👥 Team
 
-**Urvashi Vankar** - Project Lead & Full-Stack Developer
+- **Urvashi Vankar** - Project Lead & Full-Stack Developer
+- **Nidhi Bajariya** - Team Member
 
 ---
 
