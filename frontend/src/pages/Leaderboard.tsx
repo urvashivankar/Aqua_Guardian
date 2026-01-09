@@ -34,7 +34,7 @@ const Leaderboard = () => {
             }
         };
 
-        fetchLeaderboard();
+        loadLeaderboard();
     }, []);
 
     const getRankIcon = (index: number) => {
@@ -48,7 +48,6 @@ const Leaderboard = () => {
 
     return (
         <div className="min-h-screen bg-background">
-            <Navbar />
             <main className="container max-w-5xl py-12">
                 <div className="space-y-8">
                     <div className="text-center space-y-4">
@@ -140,7 +139,6 @@ const Leaderboard = () => {
                     </Card>
                 </div>
             </main>
-            <Footer />
         </div>
     );
 };

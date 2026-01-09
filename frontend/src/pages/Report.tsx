@@ -126,7 +126,53 @@ const Report = () => {
   // Fetch real user reports
   useEffect(() => {
     const loadUserReports = async () => {
-      if (!user) return;
+      // Logic to handle specific report ID from URL (e.g. from Community page)
+      const params = new URLSearchParams(window.location.search);
+      const reportId = params.get('id');
+
+      if (reportId) {
+        try {
+          const res = await axios.get(`${API_BASE_URL}/reports/${reportId}`);
+          const r = res.data;
+
+          let severityLabel: 'Low' | 'Medium' | 'High' | 'Critical' = 'Medium';
+          if (r.severity >= 10) severityLabel = 'Critical';
+          else if (r.severity >= 8) severityLabel = 'High';
+          else if (r.severity >= 5) severityLabel = 'Medium';
+          else severityLabel = 'Low';
+
+          let location = 'Unknown';
+          const match = r.description.match(/ at (.*?):/);
+          if (match) location = match[1];
+
+          const reportDetail: PollutionReport = {
+            id: r.id, // Full UUID
+            displayId: r.id.substring(0, 8).toUpperCase(),
+            location: location,
+            type: (r.ai_class || 'Unknown').replace('_', ' '),
+            severity: severityLabel,
+            description: r.description,
+            reportedBy: 'System', // Viewed publicly
+            date: new Date(r.created_at).toLocaleDateString(),
+            status: r.status,
+            actionNote: r.action_note,
+            updatedAt: r.updated_at ? new Date(r.updated_at).toLocaleDateString() : undefined,
+            aiConfidence: r.ai_confidence
+          };
+
+          setSelectedReport(reportDetail);
+          setIsDetailOpen(true);
+        } catch (e) {
+          console.error("Could not load shared report", e);
+          toast({ variant: "destructive", title: "Report Not Found", description: "The report you are looking for does not exist." });
+        }
+      }
+
+      // If no user, we can't load *their* reports, but we should stop loading
+      if (!user) {
+        setIsInitialLoading(false);
+        return;
+      }
 
       try {
         const data = await fetchUserReports(user.id);
@@ -163,63 +209,12 @@ const Report = () => {
           });
           setReports(mappedReports);
         } else {
-          throw new Error("No reports found, forcing dummy data");
+          setReports([]); // No reports found
         }
 
       } catch (error) {
-        console.error('Error loading reports or empty data:', error);
-        // Fallback to 4 dummy reports as requested
-        const dummyReports: PollutionReport[] = [
-          {
-            id: 'REF-1001',
-            displayId: 'REF-1001',
-            location: 'Mumbai Coast, Sector 4',
-            type: 'Plastic Pollution',
-            severity: 'High',
-            description: 'Large accumulation of plastic waste near the shore.',
-            reportedBy: 'Me',
-            date: new Date().toLocaleDateString(),
-            status: 'Verified',
-            aiConfidence: 0.94
-          },
-          {
-            id: 'REF-1002',
-            displayId: 'REF-1002',
-            location: 'Ganges River Bank',
-            type: 'Industrial Discharge',
-            severity: 'Critical',
-            description: 'Untreated chemicals visible in the water.',
-            reportedBy: 'Me',
-            date: new Date(Date.now() - 86400000).toLocaleDateString(),
-            status: 'Investigating',
-            aiConfidence: 0.82
-          },
-          {
-            id: 'REF-1003',
-            displayId: 'REF-1003',
-            location: 'Yamuna Bridge',
-            type: 'Sewage Overflow',
-            severity: 'Medium',
-            description: 'Sewage pipe leakage detected.',
-            reportedBy: 'Me',
-            date: new Date(Date.now() - 172800000).toLocaleDateString(),
-            status: 'Pending',
-            aiConfidence: 0.76
-          },
-          {
-            id: 'REF-1004',
-            displayId: 'REF-1004',
-            location: 'Chennai Marina',
-            type: 'Oil Spill',
-            severity: 'High',
-            description: 'Minor oil slick observed near fishing boats.',
-            reportedBy: 'Me',
-            date: new Date(Date.now() - 259200000).toLocaleDateString(),
-            status: 'Resolved',
-            aiConfidence: 0.89
-          }
-        ];
-        setReports(dummyReports);
+        console.error('Error loading reports:', error);
+        setReports([]); // Ensure empty state on error
       } finally {
         setIsInitialLoading(false);
       }

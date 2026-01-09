@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Session, User as SupabaseUser } from '@supabase/supabase-js';
 
-export type UserRole = 'Student' | 'Citizen' | 'NGO' | 'Government' | 'Other';
+export type UserRole = 'Citizen' | 'NGO' | 'Government';
 
 export interface User {
   id: string;
@@ -18,8 +18,7 @@ export interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string, role: UserRole) => Promise<{ success: boolean; message?: string }>;
-  loginSimulated: (role: UserRole, email?: string) => Promise<{ success: boolean; message?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   signup: (email: string, password: string, name: string, role: UserRole) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
@@ -41,36 +40,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchUserProfile = async (sbUser: SupabaseUser) => {
     try {
-      // Phase 1: Fetch basic profile (Essential for immediate UI response)
-      const { data: profile } = await supabase
+      console.log('🔍 [AuthContext] Fetching profile for user:', sbUser.id);
+
+      // Timeout promise for DB fetch (3 seconds max)
+      const dbFetchPromise = supabase
         .from('users')
         .select('*')
         .eq('id', sbUser.id)
         .single();
 
-      const roleRaw = profile?.role || sbUser.user_metadata?.role || 'Citizen';
-      const role = (roleRaw.charAt(0).toUpperCase() + roleRaw.slice(1)) as UserRole;
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+      );
+
+      let profile = null;
+      try {
+        const { data } = await Promise.race([dbFetchPromise, timeoutPromise]) as any;
+        profile = data;
+      } catch (err) {
+        console.warn('⚠️ [AuthContext] DB Profile fetch failed or timed out, using metadata fallback:', err);
+      }
+
+      console.log('📊 [AuthContext] Database profile:', profile);
+      console.log('📊 [AuthContext] Supabase metadata:', sbUser.user_metadata);
+
+      const roleRaw = profile?.role || sbUser.user_metadata?.role || 'citizen';
+      console.log('🎭 [AuthContext] Raw role from DB/metadata:', roleRaw);
+
+      // Map backend role (lowercase) to frontend UserRole (properly capitalized)
+      const roleMap: Record<string, UserRole> = {
+        'citizen': 'Citizen',
+        'ngo': 'NGO',
+        'government': 'Government',
+      };
+      const role = roleMap[roleRaw.toLowerCase()] || 'Citizen';
+      console.log('✅ [AuthContext] Mapped role:', role);
 
       const newUser: User = {
         id: sbUser.id,
         email: sbUser.email || '',
         name: profile?.full_name || sbUser.user_metadata?.name || sbUser.email?.split('@')[0] || 'User',
         role: role,
-        reportsSubmitted: 0,
+        reportsSubmitted: 0, // Will be updated by fetchUserStats
         cleanUpsJoined: 0,
         nftsAdopted: 0,
         createdAt: profile?.created_at || sbUser.created_at,
         location: profile?.location || 'India',
       };
 
-      // Update state immediately to unblock the UI
+      console.log('👤 [AuthContext] Setting user state:', newUser);
+
+      // ALWAYS update state to unblock UI, even if DB fetch failed
       setUser(newUser);
 
       // Phase 2: Fetch stats in the background (Non-blocking)
-      // We don't await this inside the login/session flow to keep it snappy
       fetchUserStats(sbUser.id);
     } catch (error) {
-      console.error('Error fetching user profile:', error);
+      console.error('❌ [AuthContext] Critical setup error:', error);
+      // Even in critical error, try to set a basic user to allow access
+      setUser({
+        id: sbUser.id,
+        email: sbUser.email || '',
+        name: 'User',
+        role: 'Citizen',
+        reportsSubmitted: 0,
+        cleanUpsJoined: 0,
+        nftsAdopted: 0,
+      });
     }
   };
 
@@ -100,14 +136,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    // Force refresh on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) fetchUserProfile(session.user);
+      if (session?.user) {
+        console.log('🔄 [AuthContext] Force refreshing user profile on mount');
+        fetchUserProfile(session.user);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
-        fetchUserProfile(session.user);
+      console.log('🔔 [AuthContext] Auth state changed:', event);
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user) {
+        console.log('🔄 [AuthContext] Fetching fresh profile due to:', event);
+        await fetchUserProfile(session.user);
       } else if (event === 'SIGNED_OUT') {
+        console.log('👋 [AuthContext] User signed out');
         setUser(null);
       }
     });
@@ -115,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (email: string, password: string, role: UserRole): Promise<{ success: boolean; message?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; message?: string }> => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { success: false, message: error.message };
@@ -129,45 +172,100 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const loginSimulated = async (role: UserRole, email: string = 'demo@example.com'): Promise<{ success: boolean; message?: string }> => {
-    return { success: false, message: "Simulated login is disabled. Please use real login." };
-  };
+  // Simulated login removed to enforce real authentication
 
   const signup = async (email: string, password: string, name: string, role: UserRole): Promise<{ success: boolean; message?: string }> => {
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { name, role } }
-      });
+      console.log(`🚀 Starting signup - Role: ${role}`);
 
-      if (error) return { success: false, message: error.message };
+      // Timeout wrapper
+      const signupPromise = (async () => {
+        // Direct Supabase signup
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { name, role: role.toLowerCase() },
+            emailRedirectTo: window.location.origin
+          }
+        });
 
-      if (data?.user) {
-        await supabase.from('users').insert([{
-          id: data.user.id,
-          email: data.user.email || email,
-          full_name: name,
-          role: role.toLowerCase(),
-        }]);
-        await fetchUserProfile(data.user);
-        return { success: true };
-      }
-      return { success: false, message: "Registration failed." };
+        if (authError) {
+          console.error('❌ Auth error:', authError);
+          throw new Error(authError.message);
+        }
+
+        if (!authData.user) {
+          throw new Error('No user data returned');
+        }
+
+        console.log('✅ Auth user created:', authData.user.id);
+
+        // Create profile with role (don't wait for this)
+        supabase
+          .from('users')
+          .upsert({
+            id: authData.user.id,
+            email: authData.user.email,
+            full_name: name,
+            role: role.toLowerCase()
+          }, { onConflict: 'id' })
+          .then(({ error }) => {
+            if (error) {
+              console.error('⚠️ Profile error:', error);
+            } else {
+              console.log('✅ Profile created with role:', role.toLowerCase());
+            }
+          });
+
+        // If session exists, user is logged in immediately
+        if (authData.session) {
+          await fetchUserProfile(authData.user);
+          return { success: true, message: 'Account created successfully!' };
+        }
+
+        // If no session, email confirmation is required
+        return {
+          success: true,
+          message: 'Account created! Please check your email to confirm your account.'
+        };
+      })();
+
+      // 10 second timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Signup timeout - please try again')), 10000)
+      );
+
+      return await Promise.race([signupPromise, timeoutPromise]) as { success: boolean; message?: string };
+
     } catch (error: any) {
-      return { success: false, message: error.message || "An unexpected error occurred." };
+      console.error('❌ Signup error:', error);
+      return { success: false, message: error.message || 'Registration failed' };
     }
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    console.log("👋 Logging out...");
+
+    // 1. Clear simulated session immediately
+    localStorage.removeItem('aqua_simulated_user');
+    localStorage.removeItem('aqua_user_role');
+
+    // 2. Clear user state to update UI immediately
     setUser(null);
+
+    // 3. Attempt Supabase signout in background (don't block UI)
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) console.error("⚠️ Supabase signout warning:", error.message);
+    } catch (e) {
+      console.error("⚠️ Logout non-critical error:", e);
+    }
   };
 
   const value = {
     user,
     login,
-    loginSimulated,
     signup,
     logout,
     isAuthenticated: !!user,

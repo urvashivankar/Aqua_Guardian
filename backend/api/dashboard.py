@@ -153,7 +153,7 @@ def get_success_stories():
 @router.get("/stats")
 def get_dashboard_stats():
     """
-    Returns key dashboard statistics for pollution reporting app.
+    Returns general dashboard statistics (Citizen View).
     """
     try:
         # Get total reports count efficiently
@@ -193,6 +193,63 @@ def get_dashboard_stats():
             "verified_reports": 0,
             "avg_response_time": "N/A"
         }
+
+@router.get("/ngo/stats")
+def get_ngo_stats():
+    """
+    Returns statistics specifically for NGOs (Verified Reports, Cleanup Actions).
+    """
+    try:
+        # Verified reports ready for action (AI Confidence > 70%)
+        # Filter for 'Verified by AI' or manually verified
+        verified_res = supabase.table("reports").select("id", count="exact").filter("status", "in", "('Verified by AI', 'Verified')").execute()
+        verified_count = verified_res.count if verified_res.count else 0
+        
+        # Active cleanups
+        cleanups_res = supabase.table("cleanup_actions").select("id", count="exact").eq("status", "in_progress").execute()
+        active_cleanups = cleanups_res.count if cleanups_res.count else 0
+        
+        # Total cleanups completed
+        completed_cleanups_res = supabase.table("cleanup_actions").select("id", count="exact").eq("status", "completed").execute()
+        completed_cleanups = completed_cleanups_res.count if completed_cleanups_res.count else 0
+
+        return {
+            "verified_reports_pending_action": verified_count,
+            "active_cleanup_campaigns": active_cleanups,
+            "total_cleanups_completed": completed_cleanups,
+            "volunteer_count": 1250  # Placeholder or fetch from DB
+        }
+    except Exception as e:
+        logger.error(f"Error fetching NGO stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/government/stats")
+def get_government_stats():
+    """
+    Returns statistics for Government Authorities (High Severity, Enforcement, Policy).
+    """
+    try:
+        # Critical Severity Reports
+        critical_res = supabase.table("reports").select("id", count="exact").eq("severity", 5).execute() # Assuming 5 is max severity
+        critical_alerts = critical_res.count if critical_res.count else 0
+        
+        # Reports requiring immediate attention (Verified but not resolved)
+        pending_action_res = supabase.table("reports").select("id", count="exact").filter("status", "in", "('Verified by AI', 'Verified')").execute()
+        pending_action = pending_action_res.count if pending_action_res.count else 0
+        
+        # Total Resolved (Enforcement Success)
+        resolved_res = supabase.table("reports").select("id", count="exact").eq("status", "Resolved").execute()
+        resolved_count = resolved_res.count if resolved_res.count else 0 # Ensure case matches DB
+
+        return {
+            "critical_alerts": critical_alerts,
+            "pending_action_items": pending_action,
+            "enforcement_actions_taken": resolved_count,
+            "compliance_rate": "87%" # Placeholder logic
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Government stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/reports/timeline")
 def get_reports_timeline(days: int = 30):

@@ -13,12 +13,19 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [role, setRole] = useState<UserRole>('Citizen');
+  // Role is fetched from database, not selected during login
   const [isLoading, setIsLoading] = useState(false);
 
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  // Redirect if already logged in
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,12 +43,12 @@ const Login = () => {
 
     try {
       // Using real authentication
-      const result = await login(email, password, role);
+      const result = await login(email, password);
 
       if (result.success) {
         toast({
           title: "Welcome back!",
-          description: `Successfully logged in as ${role}`,
+          description: "Successfully logged in!",
         });
         navigate('/dashboard');
       } else {
@@ -128,21 +135,7 @@ const Login = () => {
                   </div>
                 </div>
 
-                <div>
-                  <Label htmlFor="role" className="text-foreground">Role</Label>
-                  <Select value={role} onValueChange={(value: UserRole) => setRole(value)}>
-                    <SelectTrigger className="mt-1 bg-background border-border focus:border-ocean-primary">
-                      <SelectValue placeholder="Select your role" />
-                    </SelectTrigger>
-                    <SelectContent className="ocean-card border-border">
-                      <SelectItem value="Student">Student</SelectItem>
-                      <SelectItem value="Citizen">Citizen</SelectItem>
-                      <SelectItem value="NGO">NGO</SelectItem>
-                      <SelectItem value="Government">Government</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+
               </div>
 
               <Button
@@ -159,6 +152,19 @@ const Login = () => {
                   </>
                 )}
               </Button>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">
+                    Or continue with
+                  </span>
+                </div>
+              </div>
+
+              {/* Demo buttons removed for production */}
             </form>
 
             <div className="mt-6 text-center">

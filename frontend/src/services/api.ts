@@ -145,6 +145,7 @@ export const fetchTrendComparison = async (months: number = 6) => {
     }
 };
 
+
 export const fetchMarineImpactMetrics = async () => {
     try {
         const response = await api.get('/dashboard/marine-impact/metrics');
@@ -162,6 +163,56 @@ export const fetchMarineImpactMetrics = async () => {
             ecosystem_health: {},
             ai_predictions: []
         };
+    }
+};
+
+export const fetchNGOStats = async () => {
+    try {
+        const response = await api.get('/dashboard/ngo/stats');
+        return response.data || {
+            verified_reports_pending_action: 0,
+            active_cleanup_campaigns: 0,
+            total_cleanups_completed: 0,
+            volunteer_count: 0
+        };
+    } catch (error) {
+        console.error('Error fetching NGO stats:', error);
+        return {
+            verified_reports_pending_action: 0,
+            active_cleanup_campaigns: 0,
+            total_cleanups_completed: 0,
+            volunteer_count: 0
+        };
+    }
+};
+
+export const fetchGovernmentStats = async () => {
+    try {
+        const response = await api.get('/dashboard/government/stats');
+        return response.data || {
+            critical_alerts: 0,
+            pending_action_items: 0,
+            enforcement_actions_taken: 0,
+            compliance_rate: "N/A"
+        };
+    } catch (error) {
+        console.error('Error fetching Government stats:', error);
+        return {
+            critical_alerts: 0,
+            pending_action_items: 0,
+            enforcement_actions_taken: 0,
+            compliance_rate: "N/A"
+        };
+    }
+};
+
+export const fetchVerifiedReports = async () => {
+    try {
+        const response = await api.get('/reports/verified');
+        return response.data || [];
+    } catch (error) {
+        console.error('Error fetching verified reports:', error);
+        return [];
     }
 };
 

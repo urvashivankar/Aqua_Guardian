@@ -218,11 +218,9 @@ const Signup = () => {
                       <SelectValue placeholder="Select your role" />
                     </SelectTrigger>
                     <SelectContent className="ocean-card border-border">
-                      <SelectItem value="Student">Student</SelectItem>
                       <SelectItem value="Citizen">Citizen</SelectItem>
                       <SelectItem value="NGO">NGO</SelectItem>
                       <SelectItem value="Government">Government</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

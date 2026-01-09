@@ -73,6 +73,9 @@ const CaseCommunication = ({ reportId }: CaseCommunicationProps) => {
 
     const loadDiscussions = async () => {
         setIsLoading(true);
+
+
+
         try {
             const data = await fetchReportDiscussions(reportId);
             setMessages(data);
@@ -96,6 +99,32 @@ const CaseCommunication = ({ reportId }: CaseCommunicationProps) => {
         }
 
         setIsSending(true);
+
+        // --- DEMO MODE SIMULATION ---
+        if (user.id.startsWith('simulated-')) {
+            setTimeout(() => {
+                const newMsg: Message = {
+                    id: `demo-msg-${Date.now()}`,
+                    report_id: reportId,
+                    user_id: user.id,
+                    message_type: newMessageType,
+                    content: newMessageContent,
+                    created_at: new Date().toISOString(),
+                    user_role: userRole,
+                    user_name: user?.name || user?.email || 'Demo User'
+                };
+                setMessages(prev => [...prev, newMsg]);
+
+                toast({ title: "Message Posted", description: "Your message has been added to the official record. (Demo Mode)" });
+                setNewMessageContent('');
+                setNewMessageType('');
+                setSelectedFile(null);
+                setIsSending(false);
+            }, 800);
+            return;
+        }
+        // ----------------------------
+
         try {
             const formData = new FormData();
             formData.append('message_type', newMessageType);

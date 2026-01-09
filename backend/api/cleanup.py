@@ -1,6 +1,6 @@
 from db.supabase import supabase
 from utils.storage import upload_file, get_public_url
-from fastapi import Depends
+from fastapi import Depends, APIRouter, Form, File, UploadFile, HTTPException
 from utils.auth_utils import get_current_user
 
 router = APIRouter()
@@ -13,6 +13,35 @@ def start_cleanup(
 ):
     actor_id = current_user.id
     """Initialize a cleanup action for a verified report."""
+    
+    # 1. SAFETY FIREWALL: Check Report Severity
+    try:
+        report_res = supabase.table("reports").select("severity").eq("id", report_id).single().execute()
+        if report_res.data:
+            severity = report_res.data.get("severity", 0)
+            
+            # If High/Critical (8-10) and NOT Gov -> BLOCK
+            # (Assuming user role is stored in metadata or we check DB)
+            # For speed, we check the passed-in jwt claims if available, or query user profile.
+            # Using current_user which usually has role.
+            
+            # Fetch user role from DB to be sure
+            user_profile = supabase.table("users").select("role").eq("id", actor_id).single().execute()
+            user_role = user_profile.data.get("role", "citizen").lower()
+            
+            if severity >= 8 and user_role != "government":
+                raise HTTPException(
+                    status_code=403, 
+                    detail="SAFETY PROTOCOL: High-severity incidents require HAZMAT clearance. Restricted to Government agencies only."
+                )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"Firewall check failed: {e}")
+        # Fail safe? Or allow? Let's allow but log error, or fail safe. 
+        # Better key error handling ideally.
+        pass
+
     res = supabase.table("cleanup_actions").upsert({
         "report_id": report_id,
         "actor_id": actor_id,

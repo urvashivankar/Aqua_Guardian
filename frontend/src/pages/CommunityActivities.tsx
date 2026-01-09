@@ -7,6 +7,7 @@ import { MapPin, Users, CheckCircle, Clock, ArrowRight, ShieldCheck, UserCircle,
 import axios from 'axios';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -42,39 +43,8 @@ const CommunityActivities = () => {
             const response = await axios.get(`${API_BASE_URL}/cleanup/active`);
             setActivities(response.data);
         } catch (error) {
-            console.warn("Backend unavailable, using simulated data for Community Activities");
-            // Simulated Data
-            const simulatedActivities: CleanupAction[] = [
-                {
-                    id: "sim-1",
-                    report_id: "REP-101",
-                    status: "In Progress",
-                    progress: 75,
-                    participants_count: 42,
-                    organization: "Ocean Blue Foundation",
-                    reports: {
-                        latitude: 0,
-                        longitude: 0,
-                        description: "River bank restoration project near city center.",
-                        ai_class: "Plastic Cleanup Drive"
-                    }
-                },
-                {
-                    id: "sim-2",
-                    report_id: "REP-102",
-                    status: "In Progress",
-                    progress: 30,
-                    participants_count: 15,
-                    organization: "City Volunteers",
-                    reports: {
-                        latitude: 0,
-                        longitude: 0,
-                        description: "Oil spill containment efforts.",
-                        ai_class: "Oil Spill Response"
-                    }
-                }
-            ];
-            setActivities(simulatedActivities);
+            console.error("Error fetching activities:", error);
+            toast({ title: "Connection Error", description: "Failed to load community activities.", variant: "destructive" });
         } finally {
             setLoading(false);
         }
@@ -91,11 +61,23 @@ const CommunityActivities = () => {
         }
 
         setJoiningId(cleanupId);
+
+
+
         try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+
+            if (!token) throw new Error("No active session token");
+
             const formData = new FormData();
             formData.append("role", user.role);
 
-            await axios.post(`${API_BASE_URL}/cleanup/${cleanupId}/join`, formData);
+            await axios.post(`${API_BASE_URL}/cleanup/${cleanupId}/join`, formData, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
 
             toast({
                 title: "Joined Cleanup Action! 🧹",

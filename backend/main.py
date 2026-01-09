@@ -96,7 +96,7 @@ app.include_router(rewards.router, prefix="/rewards", tags=["Rewards & Gamificat
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard & Analytics"])
 app.include_router(adoption.router, prefix="/adoption", tags=["Water Body Adoption"])
 app.include_router(discussions.router, prefix="/reports", tags=["Report Discussions"])
-app.include_router(gamification.router, prefix="/gamification", tags=["Gamification"])
+app.include_router(gamification_router, prefix="/gamification", tags=["Gamification"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Push Notifications"])
 
 @app.get("/")

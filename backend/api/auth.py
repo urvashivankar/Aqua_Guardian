@@ -9,13 +9,15 @@ class UserCredentials(BaseModel):
     email: str
     password: str
     name: str = None
+    role: str = "citizen"  # Default role
 
 @router.post("/register")
 def register(user: UserCredentials):
     import re
     import traceback
     
-    logger.info(f"Received registration request for: {user.email}")
+    logger.info(f"🔵 REGISTRATION START - Email: {user.email}")
+    logger.info(f"🎭 ROLE RECEIVED: '{user.role}' (type: {type(user.role).__name__})")
     
     # Validate email format
     email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -28,15 +30,25 @@ def register(user: UserCredentials):
         logger.warning(f"Password too short for: {user.email}")
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
     
+    # Validate Role (case-insensitive)
+    valid_roles = ["citizen", "ngo", "government", "student", "other"]
+    role_lower = user.role.lower()
+    logger.info(f"🔍 Role validation - Input: '{user.role}' -> Lowercase: '{role_lower}'")
+    
+    if role_lower not in valid_roles:
+        logger.warning(f"Invalid role attempted: {user.role}")
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of {valid_roles}")
+
     try:
         # Supabase Auth Sign Up
-        logger.info(f"Attempting Supabase signup for: {user.email}")
+        logger.info(f"📤 Sending to Supabase - Role: '{role_lower}'")
         res = supabase.auth.sign_up({
             "email": user.email,
             "password": user.password,
             "options": {
                 "data": {
-                    "name": user.name
+                    "name": user.name,
+                    "role": role_lower  # Store lowercase for consistency
                 }
             }
         })
@@ -45,19 +57,25 @@ def register(user: UserCredentials):
             logger.error(f"No user data returned from Supabase for: {user.email}")
             raise HTTPException(status_code=500, detail="Registration failed - no user data returned")
         
-        # Create public profile entry
+        logger.info(f"✅ Supabase user created - ID: {res.user.id}")
+        
+        # Create public profile entry (UPSERT to handle existing users)
         try:
             profile_data = {
                 "id": res.user.id,
                 "email": res.user.email,
                 "full_name": user.name,
-                "role": "citizen" # Default role for now, can be extended
+                "role": role_lower  # CRITICAL: Store lowercase role
             }
-            supabase.table("users").insert(profile_data).execute()
-            logger.info(f"Public profile created for: {user.email}")
+            logger.info(f"💾 Upserting profile - Role: '{role_lower}'")
+            
+            # UPSERT: Insert or update if exists
+            supabase.table("users").upsert(profile_data, on_conflict="id").execute()
+            logger.info(f"✅ Profile upserted for: {user.email} with role: {role_lower}")
+            
         except Exception as profile_err:
-            logger.error(f"Failed to create public profile for {user.email}: {profile_err}")
-            # We don't fail registration if profile fails, but log it
+            logger.error(f"❌ Profile upsert failed for {user.email}: {profile_err}")
+            # Don't fail registration, just log the error
         
         logger.info(f"Registration successful for: {user.email}")
         logger.info(f"   User ID: {res.user.id}")
