@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 from db.supabase import supabase
+from middleware.logging import logger
 
 router = APIRouter()
 
@@ -156,26 +157,49 @@ def get_leaderboard(limit: int = 50, timeframe: str = "all_time"):
         
         leaderboard = []
         for idx, user_data in enumerate(result.data, 1):
-            # Get user details
-            user_result = supabase.table("users").select("name, email").eq("id", user_data["user_id"]).execute()
-            user_name = user_result.data[0]["name"] if user_result.data else "Anonymous"
+            user_id = user_data["user_id"]
             
-            # Get user's report count
-            reports_result = supabase.table("reports").select("id", count="exact").eq("user_id", user_data["user_id"]).execute()
-            report_count = reports_result.count if reports_result.count else 0
+            # Get user details (Name, Email) - Role column might be missing in DB, so we default
+            # user_result = supabase.table("users").select("name, email, role").eq("id", user_id).execute()
+            user_result = supabase.table("users").select("full_name, email").eq("id", user_id).execute()
+            user_info = user_result.data[0] if user_result.data else {}
+            user_name = user_info.get("full_name") or user_info.get("email") or "Anonymous"
+            # user_role = user_info.get("role", "Citizen") 
+            user_role = "Citizen" # Defaulting until schema is updated
+
+            # Get Verified Reports Count
+            reports_result = supabase.table("reports").select("id", count="exact").eq("user_id", user_id).eq("status", "verified").execute()
+            verified_count = reports_result.count if reports_result.count is not None else 0
+            
+            # Get Completed Cleanups Count (Assuming participation in cleanup events)
+            # Check cleanup_participation table
+            try:
+                cleanup_res = supabase.table("cleanup_participation").select("id", count="exact").eq("user_id", user_id).execute()
+                cleanup_count = cleanup_res.count if cleanup_res.count is not None else 0
+            except:
+                cleanup_count = 0
+
+            # NFTs Count (Proxy from points for now as we don't have NFT table explicit in context yet)
+            # Logic: 1 NFT for every 500 points
+            total_nfts = user_data["total_points"] // 500
             
             leaderboard.append({
                 "rank": idx,
-                "user_id": user_data["user_id"],
+                "user_id": user_id,
                 "name": user_name,
+                "role": user_role,
+                "total_nfts": total_nfts,
+                "reports_verified": verified_count,
+                "cleanups_completed": cleanup_count,
                 "points": user_data["total_points"],
-                "reports": report_count,
                 "level": calculate_level(user_data["total_points"])
             })
         
         return leaderboard
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching leaderboard: {e}")
+        # Return empty list instead of 500 to prevent UI crash
+        return []
 
 @router.get("/badges")
 def get_all_badges():

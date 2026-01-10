@@ -96,22 +96,18 @@ const Profile = () => {
           stats: [
             { label: 'Pollution Reports', value: user.reportsSubmitted, color: 'text-ocean-primary' },
             { label: 'Clean-ups Joined', value: user.cleanUpsJoined, color: 'text-success' },
-            { label: 'NFTs Adopted', value: user.nftsAdopted, color: 'text-accent' },
           ],
           achievements: [
             { icon: <FileText className="h-5 w-5" />, title: 'Reports Filed', count: user.reportsSubmitted, target: 20 },
             { icon: <Droplets className="h-5 w-5" />, title: 'Clean-ups Joined', count: user.cleanUpsJoined, target: 10 },
-            { icon: <MapPin className="h-5 w-5" />, title: 'NFTs Adopted', count: user.nftsAdopted, target: 5 },
           ],
           badges: [
             { name: 'Water Guardian', level: 'Bronze', description: 'First pollution report submitted' },
             { name: 'Eco Warrior', level: 'Silver', description: 'Participated in 3+ cleanup activities' },
-            { name: 'Ocean Protector', level: 'Gold', description: 'Adopted 2+ water bodies' },
           ],
           activity: [
             { icon: <FileText className="h-4 w-4 text-ocean-primary" />, text: "Submitted pollution report", subtext: "Mumbai Harbor - Industrial discharge • 2 days ago" },
             { icon: <Droplets className="h-4 w-4 text-success" />, text: "Joined beach cleanup", subtext: "Volunteer participation • 5 days ago" },
-            { icon: <MapPin className="h-4 w-4 text-accent" />, text: "Adopted water body NFT", subtext: "Chilika Lake protection pledge • 1 week ago" }
           ]
         };
     }

@@ -2,14 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Users, CheckCircle, Trash2, Shield, MapPin, ExternalLink, Megaphone } from 'lucide-react';
+import { Users, CheckCircle, Shield, MapPin, Megaphone, CheckSquare, XSquare, Download, Calendar, Map as MapIcon, List as ListIcon, Search, History, ArrowRight, Camera, Clock } from 'lucide-react';
 import ModernKPICard from '@/components/charts/ModernKPICard';
-import { fetchNGOStats, fetchVerifiedReports } from '@/services/api';
+import MapComponent, { MapPoint } from '@/components/MapComponent';
+import { fetchNGOStats, fetchAllReports } from '@/services/api';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import axios from 'axios';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import CleanupUploadDialog from '@/components/dashboard/CleanupUploadDialog';
 
 const NGODashboard = () => {
     const { toast } = useToast();
@@ -19,13 +23,21 @@ const NGODashboard = () => {
         total_cleanups_completed: 0,
         volunteer_count: 0
     });
-    const [verifiedReports, setVerifiedReports] = useState<any[]>([]);
+    const [reports, setReports] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Organization Modal State
+    // Filter State
+    const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
+    const [filterStatus, setFilterStatus] = useState('All');
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Action States
     const [selectedReport, setSelectedReport] = useState<any | null>(null);
     const [isOrganizing, setIsOrganizing] = useState(false);
-    const [orgName, setOrgName] = useState("Green Earth Alliance"); // Default or fetch from profile
+    const [orgName, setOrgName] = useState("Green Earth Alliance");
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [isCleanupDialogOpen, setIsCleanupDialogOpen] = useState(false);
+    const [reportToProof, setReportToProof] = useState<any | null>(null);
 
     useEffect(() => {
         loadData();
@@ -35,11 +47,11 @@ const NGODashboard = () => {
         try {
             const [statsRes, reportsRes] = await Promise.all([
                 fetchNGOStats(),
-                fetchVerifiedReports(),
+                fetchAllReports(),
             ]);
 
             if (statsRes) setStats(statsRes);
-            if (reportsRes) setVerifiedReports(reportsRes);
+            if (reportsRes) setReports(reportsRes);
         } catch (error) {
             console.error("Failed to load NGO dashboard data", error);
         } finally {
@@ -47,8 +59,48 @@ const NGODashboard = () => {
         }
     };
 
-    const handleStartCleanup = (report: any) => {
-        setSelectedReport(report);
+    // Filter Logic
+    const pendingVerificationReports = reports.filter(r => r.status === 'Awaiting Verification');
+    const actionableReports = reports.filter(r => r.status === 'Verified' || r.status === 'Resolution in Progress');
+
+    // Main Map Points (All active issues)
+    const mapPoints: MapPoint[] = reports
+        .filter(r => r.status !== 'Resolved' && r.status !== 'Closed')
+        .map(r => ({
+            id: r.id,
+            lat: r.latitude || 19.0760,
+            lng: r.longitude || 72.8777,
+            title: r.ai_class ? r.ai_class.replace(/_/g, ' ') : "Pollution Report",
+            severity: r.severity * 10,
+            description: `Status: ${r.status}`,
+            isHeatmapOnly: false
+        }));
+
+    const handleVerification = async (reportId: string, isApproved: boolean) => {
+        setIsVerifying(true);
+        try {
+            const status = isApproved ? 'Resolved' : 'Verified'; // If rejected, goes back to Verified
+            const note = isApproved ? 'Cleanup Verified by NGO Observer' : 'Cleanup rejected: Work incomplete';
+
+            const formData = new FormData();
+            formData.append('status', status);
+            formData.append('action_note', note);
+
+            const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+            await axios.put(`${API_URL}/reports/${reportId}/status`, formData);
+
+            toast({
+                title: isApproved ? "Cleanup Verified! ✅" : "Marked as Incomplete ⚠️",
+                description: isApproved ? "Points released to participants." : "Sent back to authorities.",
+                variant: isApproved ? "default" : "destructive"
+            });
+            loadData();
+        } catch (error) {
+            console.error("Verification failed", error);
+            toast({ variant: "destructive", title: "Error", description: "Failed to update status." });
+        } finally {
+            setIsVerifying(false);
+        }
     };
 
     const confirmCleanupDrive = async () => {
@@ -57,34 +109,17 @@ const NGODashboard = () => {
         try {
             const formData = new FormData();
             formData.append('organization', orgName);
-
             const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
             await axios.post(`${API_URL}/cleanup/${selectedReport.id}/start`, formData);
 
             toast({
                 title: "Campaign Launched! 🚀",
-                description: `Cleanup drive for "${selectedReport.description}" is now LIVE on the Community Board. Volunteers can join.`,
+                description: `Cleanup drive for "${selectedReport.description}" is now LIVE.`,
             });
-
             setSelectedReport(null);
             loadData();
         } catch (error: any) {
-            console.error("Campaign creation failed", error);
-            const msg = error.response?.data?.detail || "Failed to start campaign.";
-
-            if (msg.includes("SAFETY PROTOCOL")) {
-                toast({
-                    title: "Access Denied 🛑",
-                    description: "This is a High-Severity incident. Only Government agencies can deploy resources for safety reasons.",
-                    variant: "destructive"
-                });
-            } else {
-                toast({
-                    title: "Error",
-                    description: msg,
-                    variant: "destructive"
-                });
-            }
+            toast({ title: "Error", description: "Failed to start campaign.", variant: "destructive" });
         } finally {
             setIsOrganizing(false);
         }
@@ -93,45 +128,46 @@ const NGODashboard = () => {
     return (
         <div className="container mx-auto px-4 py-8 space-y-8">
             {/* Header */}
-            <div className="space-y-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <div className="flex items-center space-x-3 mb-1">
-                        <h1 className="text-3xl font-bold text-foreground">Organization Impact Overview</h1>
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-600 text-white">
-                            NGO Partner
-                        </span>
-                    </div>
-                    <p className="text-muted-foreground">
-                        Conservation Efforts & Volunteer Management
-                    </p>
+                    <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+                        <Users className="h-8 w-8 text-green-600" />
+                        Observer & Action Hub
+                    </h1>
+                    <p className="text-muted-foreground">Monitor, Verify, and Mobilize for a cleaner city.</p>
+                </div>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => toast({ title: "Downloading Report...", description: "CSV Export started." })}>
+                        <Download className="mr-2 h-4 w-4" /> Download Data
+                    </Button>
                 </div>
             </div>
 
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <ModernKPICard
-                    title="Pending Actions"
-                    value={stats.verified_reports_pending_action}
+                    title="Awaiting Verification"
+                    value={pendingVerificationReports.length}
                     change={5.2}
-                    icon={<Shield className="h-5 w-5" />}
+                    icon={<CheckSquare className="h-5 w-5" />}
                     color="#f59e0b"
-                    subtitle="Verified reports awaiting cleanup"
+                    subtitle="Requires audit"
                 />
                 <ModernKPICard
                     title="Active Campaigns"
                     value={stats.active_cleanup_campaigns}
                     change={0}
-                    icon={<Users className="h-5 w-5" />}
+                    icon={<Megaphone className="h-5 w-5" />}
                     color="#3b82f6"
-                    subtitle="Ongoing on-ground missions"
+                    subtitle="Ongoing missions"
                 />
                 <ModernKPICard
-                    title="Cleanups Done"
+                    title="Verified & Cleaned"
                     value={stats.total_cleanups_completed}
                     change={12.4}
                     icon={<CheckCircle className="h-5 w-5" />}
                     color="#10b981"
-                    subtitle="Total successful missions"
+                    subtitle="Total impact"
                 />
                 <ModernKPICard
                     title="Volunteers"
@@ -139,102 +175,219 @@ const NGODashboard = () => {
                     change={8.5}
                     icon={<Users className="h-5 w-5" />}
                     color="#8b5cf6"
-                    subtitle="Registered active members"
+                    subtitle="Active members"
                 />
             </div>
 
-            {/* Actionable Reports List */}
-            <Card className="ocean-card">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Trash2 className="h-5 w-5 text-destructive" />
-                        Verified Pollution Reports (Actionable)
-                    </CardTitle>
-                    <CardDescription>High-confidence reports ready for cleanup assignment</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {isLoading ? (
-                        <div className="space-y-4">
-                            {[1, 2, 3].map(i => <div key={i} className="h-16 bg-muted/20 animate-pulse rounded-lg" />)}
-                        </div>
-                    ) : verifiedReports.length > 0 ? (
-                        <div className="space-y-4">
-                            {verifiedReports.map((report) => (
-                                <div key={report.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-muted/10 rounded-xl border border-border/50 hover:bg-muted/20 transition-colors gap-4">
-                                    <div className="space-y-1">
-                                        <div className="flex items-center gap-2">
-                                            <Badge variant={report.severity >= 4 ? "destructive" : "default"}>
-                                                Severity: {report.severity}
-                                            </Badge>
-                                            <Badge variant="outline" className="text-green-600 border-green-600/30">
-                                                {report.status}
-                                            </Badge>
-                                            <span className="text-xs text-muted-foreground">{new Date(report.created_at).toLocaleDateString()}</span>
-                                        </div>
-                                        <h3 className="font-semibold text-foreground">{report.description}</h3>
-                                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                            <MapPin className="h-3 w-3" />
-                                            {report.location || `${report.latitude?.toFixed(4)}, ${report.longitude?.toFixed(4)}`}
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <Button size="sm" variant="outline" onClick={() => window.open(report.photo_url, '_blank')}>View Details</Button>
-                                        <Button size="sm" className="bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20" onClick={() => handleStartCleanup(report)}>
-                                            <Megaphone className="mr-2 h-4 w-4" />
-                                            Organize Drive
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-center py-10 text-muted-foreground">
-                            No pending verified reports found. Great job!
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+            <Tabs defaultValue="verification" className="space-y-6">
+                <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
+                    <TabsTrigger value="verification">Verification Hub</TabsTrigger>
+                    <TabsTrigger value="monitoring">Monitoring Map</TabsTrigger>
+                    <TabsTrigger value="action">Action Center</TabsTrigger>
+                    <TabsTrigger value="audit">Audit Trail</TabsTrigger>
+                </TabsList>
 
-            {/* Campaign Organization Dialog */}
+                {/* VERIFICATION HUB */}
+                <TabsContent value="verification" className="space-y-4">
+                    <Card className="ocean-card border-l-4 border-l-yellow-500">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <CheckSquare className="h-5 w-5 text-yellow-500" />
+                                Pending Cleanup Verification
+                            </CardTitle>
+                            <CardDescription>Review "After" photos and officially verify the cleanup to resolve the report.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="h-20 bg-muted animate-pulse rounded" />
+                            ) : pendingVerificationReports.length > 0 ? (
+                                <div className="grid grid-cols-1 gap-6">
+                                    {pendingVerificationReports.map((report) => (
+                                        <div key={report.id} className="bg-card border rounded-xl overflow-hidden shadow-sm">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 h-64">
+                                                <div className="relative border-r bg-muted/20">
+                                                    <div className="absolute top-2 left-2 z-10 bg-black/70 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-lg uppercase tracking-wider">Original Report</div>
+                                                    <img src={report.photo_url} className="w-full h-full object-cover grayscale-[0.3]" alt="Before" />
+                                                </div>
+                                                <div className="relative bg-muted/20">
+                                                    <div className="absolute top-2 right-2 z-10 bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-lg uppercase tracking-wider">Cleanup Proof (Required)</div>
+                                                    {report.verification_image || (report.photos && report.photos[1]?.url) ? (
+                                                        <img src={report.verification_image || report.photos[1].url} className="w-full h-full object-cover" alt="After" />
+                                                    ) : (
+                                                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 text-white p-4 text-center">
+                                                            <Camera className="h-8 w-8 mb-2 opacity-50" />
+                                                            <p className="text-xs font-semibold">NO CLEANUP PROOF UPLOADED</p>
+                                                            <p className="text-[10px] opacity-70 mt-1">Officer must upload proof to enable verification.</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                                                <div>
+                                                    <h3 className="font-semibold">{report.description}</h3>
+                                                    <p className="text-sm text-muted-foreground">{report.location}</p>
+                                                </div>
+                                                <div className="flex gap-3">
+                                                    <Button
+                                                        variant="destructive"
+                                                        disabled={isVerifying}
+                                                        onClick={() => handleVerification(report.id, false)}
+                                                    >
+                                                        <XSquare className="mr-2 h-4 w-4" /> Work Incomplete
+                                                    </Button>
+                                                    <Button
+                                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                                        disabled={isVerifying}
+                                                        onClick={() => handleVerification(report.id, true)}
+                                                    >
+                                                        <CheckCircle className="mr-2 h-4 w-4" /> Cleanup Verified
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <CheckCircle className="h-12 w-12 mx-auto text-green-500 mb-3 opacity-20" />
+                                    No reports pending verification. All good!
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* MONITORING MAP */}
+                <TabsContent value="monitoring" className="space-y-4">
+                    <Card className="h-[600px] overflow-hidden border-none shadow-none">
+                        <MapComponent points={mapPoints} zoom={11} center={[19.0760, 72.8777]} showHeatmap={false} />
+                    </Card>
+                </TabsContent>
+
+                {/* ACTION CENTER */}
+                <TabsContent value="action" className="space-y-4">
+                    <Card className="ocean-card">
+                        <CardHeader>
+                            <CardTitle>Active Pollution Sites</CardTitle>
+                            <CardDescription>Verified reports where you can organize cleanup drives.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                {actionableReports.map((report) => (
+                                    <div key={report.id} className="flex flex-col md:flex-row justify-between items-center p-4 bg-muted/10 rounded-lg border hover:bg-muted/20 transition-colors">
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <Badge variant={report.severity >= 8 ? "destructive" : "default"}>
+                                                    Severity: {report.severity}
+                                                </Badge>
+                                                <span className="text-sm font-medium text-muted-foreground">{report.type}</span>
+                                            </div>
+                                            <h4 className="font-semibold">{report.description}</h4>
+                                            <p className="text-xs text-muted-foreground">{report.location}</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => { setReportToProof(report); setIsCleanupDialogOpen(true); }}
+                                                className="mt-2 md:mt-0 border-green-600 text-green-600 hover:bg-green-50"
+                                            >
+                                                <Camera className="mr-2 h-4 w-4" /> Upload Proof
+                                            </Button>
+                                            <Button onClick={() => setSelectedReport(report)} className="mt-2 md:mt-0">
+                                                <Megaphone className="mr-2 h-4 w-4" /> Organize Drive
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {actionableReports.length === 0 && (
+                                    <div className="text-center py-8 text-muted-foreground">No actionable reports available.</div>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* AUDIT TRAIL / HISTORY */}
+                <TabsContent value="audit" className="space-y-4">
+                    <Card className="ocean-card border-l-4 border-l-blue-500">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <History className="h-5 w-5 text-blue-500" />
+                                Accountability Record (Prompt 7)
+                            </CardTitle>
+                            <CardDescription>Complete longitudinal log of every action, status change, and verification date/time.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                {reports.filter(r => r.status === 'Resolved' || r.action_note).slice(0, 10).map((report) => (
+                                    <div key={report.id} className="flex items-start gap-4 p-4 bg-muted/10 rounded-lg border">
+                                        <div className="mt-1">
+                                            <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                                                <Clock className="h-4 w-4 text-blue-600" />
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 space-y-1">
+                                            <div className="flex justify-between">
+                                                <h4 className="font-bold text-sm">Incident #{report.id.substring(0, 8)}</h4>
+                                                <span className="text-[10px] text-muted-foreground uppercase">{new Date(report.updated_at || report.created_at).toLocaleString()}</span>
+                                            </div>
+                                            <p className="text-sm">{report.action_note || "Status updated to " + report.status}</p>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <Badge variant="outline" className="text-[10px]">{report.status}</Badge>
+                                                <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                                <span className="text-[10px] font-mono text-muted-foreground">{report.location || "City Limits"}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {reports.filter(r => r.status === 'Resolved' || r.action_note).length === 0 && (
+                                    <div className="text-center py-8 text-muted-foreground">No audit entries found.</div>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            </Tabs>
+
+            {/* Campaign Dialog */}
             <Dialog open={!!selectedReport} onOpenChange={(open) => !open && setSelectedReport(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-ocean-primary">
-                            <Users className="h-5 w-5" />
-                            Launch Cleanup Campaign
-                        </DialogTitle>
-                        <DialogDescription>
-                            Mobilize volunteers for this verified incident. This will create a public event card.
-                        </DialogDescription>
+                        <DialogTitle>Launch Cleanup Campaign</DialogTitle>
+                        <DialogDescription>Mobilize volunteers for this verified incident.</DialogDescription>
                     </DialogHeader>
                     {selectedReport && (
                         <div className="grid gap-4 py-4">
                             <div className="p-3 bg-muted rounded-md text-sm">
-                                <span className="font-bold">Location:</span> {selectedReport.description}
+                                <span className="font-bold">Target:</span> {selectedReport.description}
                             </div>
                             <div className="grid gap-2">
                                 <Label htmlFor="org-name">Lead Organization</Label>
-                                <Input
-                                    id="org-name"
-                                    value={orgName}
-                                    onChange={(e) => setOrgName(e.target.value)}
-                                />
+                                <Input id="org-name" value={orgName} onChange={(e) => setOrgName(e.target.value)} />
                             </div>
-                            {selectedReport.severity >= 8 && (
-                                <div className="text-xs text-destructive font-bold p-2 border border-destructive/20 bg-destructive/5 rounded">
-                                    ⚠️ WARNING: High Severity Level. Ensure you have specialized equipment or Hazmat certification before proceeding.
-                                </div>
-                            )}
                         </div>
                     )}
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setSelectedReport(null)}>Cancel</Button>
-                        <Button onClick={confirmCleanupDrive} disabled={isOrganizing} className="bg-green-600 hover:bg-green-700 text-white">
+                        <Button onClick={confirmCleanupDrive} disabled={isOrganizing}>
                             {isOrganizing ? "Launching..." : "Publish Campaign"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Cleanup Upload Dialog for NGOs */}
+            {reportToProof && (
+                <CleanupUploadDialog
+                    isOpen={isCleanupDialogOpen}
+                    onClose={() => setIsCleanupDialogOpen(false)}
+                    reportId={reportToProof.id}
+                    onSuccess={() => {
+                        loadData();
+                        setReportToProof(null);
+                    }}
+                />
+            )}
         </div>
     );
 };

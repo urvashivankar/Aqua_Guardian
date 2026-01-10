@@ -14,18 +14,21 @@ const Navbar = () => {
     { href: '/', label: 'Home' },
     { href: '/dashboard', label: 'Dashboard' },
     { href: '/report', label: 'Report Pollution' },
-    { href: '/nft-adoption', label: 'NFT Adoption' },
     { href: '/marine-impact', label: 'Marine Impact' },
     { href: '/community-action', label: 'Community Action' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/how-to-use', label: 'How to Use' },
   ];
 
+  const filteredNavLinks = navLinks.filter(link => {
+    if ((user?.role === 'Government' || user?.role === 'NGO') && link.href === '/report') return false;
+    return true;
+  });
+
   return (
     <nav className="ocean-card border-b sticky top-0 z-50 backdrop-blur-lg animate-fade-in">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-3 group">
             <div className="bg-ocean-primary/10 p-2 rounded-xl group-hover:bg-ocean-primary/20 transition-colors">
@@ -36,7 +39,7 @@ const Navbar = () => {
 
           {/* Desktop Navigation */}
           <div className="hidden lg:flex items-center space-x-6">
-            {navLinks.map((link) => (
+            {filteredNavLinks.map((link) => (
               <Link
                 key={link.href}
                 to={link.href}
@@ -86,7 +89,7 @@ const Navbar = () => {
               </SheetTrigger>
               <SheetContent side="right" className="w-[300px] sm:w-[400px] ocean-card">
                 <div className="flex flex-col space-y-4 mt-8">
-                  {navLinks.map((link) => (
+                  {filteredNavLinks.map((link) => (
                     <Link
                       key={link.href}
                       to={link.href}

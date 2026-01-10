@@ -2,14 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { AlertOctagon, TrendingUp, Shield, FileText, CheckCircle, Upload, Download, X } from 'lucide-react';
+import { AlertOctagon, TrendingUp, Shield, FileText, CheckCircle, Upload, Download, Filter, Map, List, Search, Play, Camera, Clock } from 'lucide-react';
 import ModernKPICard from '@/components/charts/ModernKPICard';
+import MapComponent, { MapPoint } from '@/components/MapComponent';
 import { fetchGovernmentStats, fetchVerifiedReports } from '@/services/api';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import CleanupUploadDialog from '@/components/dashboard/CleanupUploadDialog';
 import axios from 'axios';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 const GovernmentDashboard = () => {
     const { toast } = useToast();
@@ -19,16 +21,26 @@ const GovernmentDashboard = () => {
         enforcement_actions_taken: 0,
         compliance_rate: "N/A"
     });
-    const [criticalReports, setCriticalReports] = useState<any[]>([]);
+    const [reports, setReports] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
 
-    // Deployment Modal State
+    // Filters
+    const [filterStatus, setFilterStatus] = useState("All");
+    const [filterType, setFilterType] = useState("All");
+    const [searchQuery, setSearchQuery] = useState("");
+
+    const getResponseAge = (dateString: string) => {
+        const created = new Date(dateString);
+        const now = new Date();
+        const diffTime = Math.abs(now.getTime() - created.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays <= 1 ? "1 day ago" : `${diffDays} days ago`;
+    };
+
+    // Modals
     const [selectedReport, setSelectedReport] = useState<any | null>(null);
-    const [isDeploying, setIsDeploying] = useState(false);
-    const [actionNote, setActionNote] = useState("");
-
-    // Export State
-    const [isExporting, setIsExporting] = useState(false);
+    const [isCleanupDialogOpen, setIsCleanupDialogOpen] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -42,10 +54,7 @@ const GovernmentDashboard = () => {
             ]);
 
             if (statsRes) setStats(statsRes);
-            if (reportsRes) {
-                // Filter for high severity (>= 4) for Gov dashboard
-                setCriticalReports(reportsRes.filter((r: any) => r.severity >= 4 && r.status !== 'Resolution in Progress'));
-            }
+            if (reportsRes) setReports(reportsRes);
         } catch (error) {
             console.error("Failed to load Government dashboard data", error);
         } finally {
@@ -53,226 +62,286 @@ const GovernmentDashboard = () => {
         }
     };
 
-    const handleDeployTeam = (report: any) => {
-        setSelectedReport(report);
-        setActionNote(`Deploying Rapid Response Team to sectors ${report.latitude.toFixed(4)}, ${report.longitude.toFixed(4)} for immediate hazardous material containment.`);
-    };
+    // Filter Logic
+    const filteredReports = reports.filter(r => {
+        const matchesStatus = filterStatus === "All" || r.status === filterStatus;
+        const matchesType = filterType === "All" || ((r.ai_class || r.type) === filterType);
+        const matchesSearch = r.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            r.id.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchesStatus && matchesType && matchesSearch;
+    });
 
-    const confirmDeployment = async () => {
-        if (!selectedReport) return;
-        setIsDeploying(true);
+    // Map Points
+    const mapPoints: MapPoint[] = filteredReports.map(r => ({
+        id: r.id,
+        lat: r.latitude || 19.0760, // Default to Mumbai if missing
+        lng: r.longitude || 72.8777,
+        title: r.ai_class ? r.ai_class.replace(/_/g, ' ') : "Pollution Report",
+        severity: r.severity * 10, // Scale 1-10 to 10-100
+        description: `Status: ${r.status}`,
+        isHeatmapOnly: false
+    }));
+
+    // Actions
+    const handleStartCleaning = async (reportId: string) => {
         try {
             const formData = new FormData();
             formData.append('status', 'Resolution in Progress');
-            formData.append('action_note', actionNote);
-
-            // Using API URL from env or default
             const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-            await axios.post(`${API_URL}/reports/${selectedReport.id}/status`, formData);
+            await axios.put(`${API_URL}/reports/${reportId}/status`, formData);
 
-            toast({
-                title: "Team Deployed Successfully",
-                description: `Enforcement ID #${Math.floor(Math.random() * 9000) + 1000} generated. Status updated.`,
-            });
-
-            setSelectedReport(null);
-            loadData(); // Refresh list
+            toast({ title: "Status Updated", description: "Cleaning crew dispatched. Report marked as 'In Progress'." });
+            loadData();
+            setSelectedReport(null); // Close modal
         } catch (error) {
-            console.error("Deployment failed", error);
-            toast({
-                title: "Deployment Failed",
-                description: "Could not update system status. Please try again.",
-                variant: "destructive"
-            });
-        } finally {
-            setIsDeploying(false);
+            console.error("Update failed", error);
+            toast({ variant: "destructive", title: "Error", description: "Failed to update status." });
         }
     };
 
-    const handleExportData = () => {
-        setIsExporting(true);
-        setTimeout(() => {
-            setIsExporting(false);
-            toast({
-                title: "Data Packet Sent",
-                description: "Encrypted CSV export successfully transmitted to Central Smart City Command Center (ICCC).",
-            });
-        }, 1500);
-    };
-
     return (
-        <div className="container mx-auto px-4 py-8 space-y-8">
-            {/* Alert Banner */}
-            {stats.critical_alerts > 0 && (
-                <div className="bg-destructive/10 border-l-4 border-destructive p-4 rounded-r shadow-sm animate-in slide-in-from-top duration-500">
-                    <div className="flex">
-                        <div className="flex-shrink-0">
-                            <AlertOctagon className="h-5 w-5 text-destructive" />
-                        </div>
-                        <div className="ml-3">
-                            <p className="text-sm text-destructive font-bold">
-                                URGENT: {stats.critical_alerts} Critical Pollution Events require immediate enforcement action.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            )}
+        <div className="container mx-auto px-4 py-8 space-y-6">
 
-            {/* Header */}
+            {/* Header / Command Center Title */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <div className="flex items-center space-x-3 mb-1">
-                        <h1 className="text-3xl font-bold text-foreground">Official Administrative Dashboard</h1>
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-700 text-white">
-                            Government Authority
-                        </span>
-                    </div>
-                    <p className="text-muted-foreground">
-                        Oversight, Validation & Enforcement Portal
-                    </p>
+                    <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+                        <Shield className="h-8 w-8 text-blue-700" />
+                        City Command Center
+                    </h1>
+                    <p className="text-muted-foreground">Municipal Pollution Oversight & Response System</p>
                 </div>
-                <Button variant="outline" onClick={handleExportData} disabled={isExporting} className="border-blue-200 hover:bg-blue-50 text-blue-700">
-                    {isExporting ? (
-                        <>Processing Encryption...</>
-                    ) : (
-                        <>
-                            <Download className="mr-2 h-4 w-4" />
-                            Export for ICCC
-                        </>
-                    )}
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant={viewMode === 'map' ? 'default' : 'outline'} onClick={() => setViewMode('map')} size="sm">
+                        <Map className="h-4 w-4 mr-2" /> Map View
+                    </Button>
+                    <Button variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')} size="sm">
+                        <List className="h-4 w-4 mr-2" /> List View
+                    </Button>
+                </div>
             </div>
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* KPI Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <ModernKPICard
-                    title="Critical Alerts"
-                    value={stats.critical_alerts}
-                    change={10.5}
-                    icon={<AlertOctagon className="h-5 w-5" />}
-                    color="#ef4444" // Red
-                    subtitle="Severity Level 5 Events"
-                />
-                <ModernKPICard
-                    title="Pending Actions"
-                    value={stats.pending_action_items}
-                    change={-2.1}
+                    title="Total Reports"
+                    value={stats.pending_action_items + stats.enforcement_actions_taken} // Approx total using avail stats
+                    change={0}
                     icon={<FileText className="h-5 w-5" />}
-                    color="#f59e0b" // Orange
-                    subtitle="Reports requiring review"
+                    color="#64748b"
+                    subtitle="All time"
                 />
                 <ModernKPICard
-                    title="Enforcement"
-                    value={stats.enforcement_actions_taken}
-                    change={18.2}
-                    icon={<Shield className="h-5 w-5" />}
-                    color="#3b82f6" // Blue
-                    subtitle="Official actions taken"
+                    title="Pending"
+                    value={reports.filter(r => r.status === 'Verified').length}
+                    change={12}
+                    icon={<AlertOctagon className="h-5 w-5" />}
+                    color="#ef4444"
+                    subtitle="Action required"
                 />
                 <ModernKPICard
-                    title="Compliance Rate"
-                    value={stats.compliance_rate}
-                    change={1.5}
+                    title="In Progress"
+                    value={reports.filter(r => r.status === 'Resolution in Progress').length}
+                    change={-5}
+                    icon={<TrendingUp className="h-5 w-5" />}
+                    color="#f59e0b"
+                    subtitle="Crew dispatch"
+                />
+                <ModernKPICard
+                    title="Resolved"
+                    value={reports.filter(r => ['Resolved', 'Closed'].includes(r.status)).length}
+                    change={8}
                     icon={<CheckCircle className="h-5 w-5" />}
-                    color="#10b981" // Green
-                    subtitle="City-wide adherence"
+                    color="#10b981"
+                    subtitle="Successfully cleaned"
                 />
             </div>
 
-            {/* Critical Reports Section */}
-            <Card className="ocean-card border-l-4 border-l-destructive/50">
-                <CardHeader>
-                    <CardTitle className="text-destructive flex items-center gap-2">
-                        <AlertOctagon className="h-5 w-5" />
-                        Critical Incidents Log
-                    </CardTitle>
-                    <CardDescription>High-severity verified reports requiring official intervention</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {isLoading ? (
-                        <div className="space-y-4">
-                            {[1, 2].map(i => <div key={i} className="h-16 bg-muted/20 animate-pulse rounded-lg" />)}
-                        </div>
-                    ) : criticalReports.length > 0 ? (
-                        <div className="space-y-4">
-                            {criticalReports.map((report) => (
-                                <div key={report.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-muted/10 rounded-xl border border-destructive/20 hover:bg-destructive/5 transition-colors gap-4">
-                                    <div className="space-y-1">
-                                        <div className="flex items-center gap-2">
-                                            <Badge variant="destructive" className="animate-pulse">
-                                                CRITICAL SEVERITY: {report.severity}
-                                            </Badge>
-                                            <span className="text-xs font-bold uppercase text-muted-foreground tracking-widest">
-                                                Case ID: {report.id.substring(0, 8)}
-                                            </span>
-                                        </div>
-                                        <h3 className="font-bold text-foreground text-lg">{report.description}</h3>
-                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                            <span>Location: {report.location || `${report.latitude?.toFixed(4)}, ${report.longitude?.toFixed(4)}`}</span>
-                                            <span>•</span>
-                                            <span>{new Date(report.created_at).toLocaleString()}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <Button size="sm" variant="secondary" onClick={() => window.open(report.photo_url, '_blank')}>
-                                            View Evidence
-                                        </Button>
-                                        <Button size="sm" className="bg-destructive hover:bg-destructive/90 text-white shadow-lg shadow-destructive/20" onClick={() => handleDeployTeam(report)}>
-                                            Deploy Team
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-center py-10 text-muted-foreground">
-                            No critical incidents active. Situation stable.
-                        </div>
-                    )}
+            {/* Filter Panel */}
+            <Card className="bg-card/50 border-input">
+                <CardContent className="p-4 flex flex-col md:flex-row gap-4 items-center">
+                    <div className="relative w-full md:w-1/3">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                            placeholder="Search location or ID..."
+                            className="pl-8 bg-background"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                    <Select value={filterType} onValueChange={setFilterType}>
+                        <SelectTrigger className="w-full md:w-[200px] bg-background">
+                            <SelectValue placeholder="Pollution Type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="All">All Types</SelectItem>
+                            <SelectItem value="Plastic_Pollution">Plastic Pollution</SelectItem>
+                            <SelectItem value="Oil_Spill">Oil Spill</SelectItem>
+                            <SelectItem value="Industrial_Discharge">Industrial Discharge</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Select value={filterStatus} onValueChange={setFilterStatus}>
+                        <SelectTrigger className="w-full md:w-[200px] bg-background">
+                            <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="All">All Statuses</SelectItem>
+                            <SelectItem value="Verified">Pending</SelectItem>
+                            <SelectItem value="Resolution in Progress">In Progress</SelectItem>
+                            <SelectItem value="Resolved">Resolved</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </CardContent>
             </Card>
 
-            {/* Deployment Dialog */}
+            {/* Main Content Area: Map or List */}
+            <div className="h-[600px] w-full bg-card rounded-xl border border-input overflow-hidden relative">
+                {viewMode === 'map' ? (
+                    <MapComponent points={mapPoints} zoom={11} center={[19.0760, 72.8777]} showHeatmap={false} />
+                ) : (
+                    <div className="overflow-auto h-full p-4">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-muted/50 text-muted-foreground uppercase text-xs">
+                                <tr>
+                                    <th className="px-4 py-3">Report ID</th>
+                                    <th className="px-4 py-3">Location</th>
+                                    <th className="px-4 py-3">Type</th>
+                                    <th className="px-4 py-3">Age</th>
+                                    <th className="px-4 py-3">Status</th>
+                                    <th className="px-4 py-3">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                                {filteredReports.map((report) => (
+                                    <tr key={report.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => setSelectedReport(report)}>
+                                        <td className="px-4 py-3 font-mono">{report.id.substring(0, 8)}...</td>
+                                        <td className="px-4 py-3 truncate max-w-[200px]">{report.location || "Unknown"}</td>
+                                        <td className="px-4 py-3">
+                                            <Badge variant="outline">{report.ai_class?.replace(/_/g, ' ') || report.type}</Badge>
+                                        </td>
+                                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                                            <div className="flex items-center gap-1">
+                                                <Clock className="h-3 w-3" />
+                                                {getResponseAge(report.created_at)}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <Badge className={
+                                                report.status === 'Verified' ? 'bg-red-500' :
+                                                    report.status === 'Resolution in Progress' ? 'bg-yellow-500' :
+                                                        'bg-green-500'
+                                            }>
+                                                {report.status}
+                                            </Badge>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                                                <AlertOctagon className="h-4 w-4" />
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* Report Detail Modal (Critical Command Center Detail) */}
             <Dialog open={!!selectedReport} onOpenChange={(open) => !open && setSelectedReport(null)}>
-                <DialogContent className="sm:max-w-[525px]">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-destructive">
-                            <Shield className="h-5 w-5" />
-                            Confirm Enforcement Deployment
-                        </DialogTitle>
-                        <DialogDescription>
-                            This action will dispatch municipal teams and officially log this incident as "Under Investigation".
-                        </DialogDescription>
-                    </DialogHeader>
+                <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                     {selectedReport && (
-                        <div className="grid gap-4 py-4">
-                            <div className="p-3 bg-muted rounded-md text-sm">
-                                <span className="font-bold">Target:</span> {selectedReport.description} <br />
-                                <span className="font-bold">Severity:</span> {selectedReport.severity}/10
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="flex justify-between items-center text-2xl">
+                                    <span>Incident #{selectedReport.id.substring(0, 8)}</span>
+                                    <Badge variant="outline" className="text-base px-3">{selectedReport.status}</Badge>
+                                </DialogTitle>
+                                <DialogDescription className="flex items-center gap-2">
+                                    <Map className="h-4 w-4" /> {selectedReport.location || "Location Coordinates"}
+                                    <span className="mx-2">•</span>
+                                    {new Date(selectedReport.created_at).toLocaleString()}
+                                </DialogDescription>
+                            </DialogHeader>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                                {/* Left: Evidence */}
+                                <div className="space-y-4">
+                                    <div className="rounded-lg overflow-hidden border border-border bg-muted/20 relative aspect-video">
+                                        <img
+                                            src={selectedReport.photo_url}
+                                            alt="Evidence"
+                                            className="object-cover w-full h-full"
+                                        />
+                                        <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                                            AI Confidence: {(selectedReport.ai_confidence * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                    <div className="bg-muted p-4 rounded-lg text-sm space-y-2">
+                                        <h4 className="font-semibold text-foreground">AI Analysis Result</h4>
+                                        <p>Detected: <span className="font-mono text-blue-600">{selectedReport.ai_class}</span></p>
+                                        <p>Severity Score: {selectedReport.severity}/10</p>
+                                    </div>
+                                </div>
+
+                                {/* Right: Actions & Map */}
+                                <div className="space-y-6">
+                                    <div className="space-y-2">
+                                        <h4 className="font-semibold">Description</h4>
+                                        <p className="text-sm text-muted-foreground bg-card border p-3 rounded-md">
+                                            {selectedReport.description}
+                                        </p>
+                                    </div>
+
+                                    {/* Action Panel */}
+                                    <div className="space-y-3 pt-4 border-t border-border">
+                                        <h4 className="font-semibold text-lg flex items-center gap-2">
+                                            <Shield className="h-5 w-5 text-blue-700" />
+                                            Command Actions
+                                        </h4>
+
+                                        <div className="grid grid-cols-1 gap-3">
+                                            {selectedReport.status === 'Verified' && (
+                                                <Button
+                                                    className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
+                                                    onClick={() => handleStartCleaning(selectedReport.id)}
+                                                >
+                                                    <Play className="mr-2 h-4 w-4" /> Mark as Cleaning Started
+                                                </Button>
+                                            )}
+
+                                            {['Verified', 'Resolution in Progress'].includes(selectedReport.status) && (
+                                                <Button
+                                                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                                                    onClick={() => setIsCleanupDialogOpen(true)}
+                                                >
+                                                    <Camera className="mr-2 h-4 w-4" /> Upload Cleanup Proof & Close
+                                                </Button>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground text-center mt-2">
+                                            Action logged by: Official Authority
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="grid gap-2">
-                                <Label htmlFor="action-note">Enforcement Plan / Dispatch Note</Label>
-                                <Textarea
-                                    id="action-note"
-                                    value={actionNote}
-                                    onChange={(e) => setActionNote(e.target.value)}
-                                    className="h-24"
-                                />
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-yellow-50 p-2 rounded border border-yellow-200 text-yellow-800">
-                                <Upload className="h-3 w-3" />
-                                Official Evidence Upload will be required upon case closure.
-                            </div>
-                        </div>
+                        </>
                     )}
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setSelectedReport(null)}>Cancel</Button>
-                        <Button onClick={confirmDeployment} disabled={isDeploying} className="bg-destructive text-white hover:bg-destructive/90">
-                            {isDeploying ? "Processing..." : "Authorize Deployment"}
-                        </Button>
-                    </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Cleanup Upload Dialog */}
+            {selectedReport && (
+                <CleanupUploadDialog
+                    isOpen={isCleanupDialogOpen}
+                    onClose={() => setIsCleanupDialogOpen(false)}
+                    reportId={selectedReport.id}
+                    onSuccess={() => {
+                        loadData(); // Refresh list
+                        setSelectedReport(null); // Close main detail modal too
+                    }}
+                />
+            )}
         </div>
     );
 };

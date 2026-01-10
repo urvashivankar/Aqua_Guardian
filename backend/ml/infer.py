@@ -1,11 +1,7 @@
 import os
-import io
+import base64
 import json
-import numpy as np
-from PIL import Image
-import torch
-import torchvision.transforms as transforms
-import torchvision.models as models
+from groq import Groq
 
 try:
     from middleware.logging import logger
@@ -13,169 +9,106 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
-# Global model state
-_model = None
-_categories = None
-_is_local = False
+# Initialize Groq client
+# Note: In production, ensure GROQ_API_KEY is set in environment variables
+_client = None
 
-# Global pre-processing (Avoid re-creating on every request)
-_preprocess = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
+def get_client():
+    global _client
+    if _client is None:
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            logger.warning("GROQ_API_KEY not found in environment variables. Inference will fail.")
+        _client = Groq(api_key=api_key)
+    return _client
 
-def get_model():
-    global _model, _categories, _is_local
-    if _model is None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(script_dir, "model.pth")
-        class_path = os.path.join(script_dir, "class_indices.json")
-
-        if os.path.exists(model_path) and os.path.exists(class_path):
-            logger.info("Loading Local Pilot-Trained Model (Perfectly Match Dataset)...")
-            with open(class_path, 'r') as f:
-                indices = json.load(f)
-                # Ensure keys are integers (json saves them as strings)
-                _categories = {int(k): v for k, v in indices.items()}
-            
-            num_classes = len(_categories)
-            from .model import get_model as get_arch
-            _model = get_arch(num_classes=num_classes)
-            _model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-            _is_local = True
-        else:
-            logger.info("Initializing Pure-PyTorch Generic Inference (EfficientNet-B0)...")
-            _model = models.efficientnet_b0(pretrained=True)
-            _is_local = False
-            
-        _model.eval()
-    return _model
-
-def get_shared_model():
-    """Explicitly pre-load the model to avoid first-request latency."""
-    logger.info("⚡ Pre-loading AI Model and Weights...")
-    return get_model()
-
-def get_scene_relevance(img):
-    """
-    Heuristic to detect if the image is a screenshot, UI, or non-nature.
-    Checks for digital syntheticness vs natural variety.
-    """
-    # 1. Color Variety Check (Nature images are extremely inverse/diverse)
-    # Total pixels in 64x64 = 4096
-    img_small = img.resize((64, 64))
-    pixels = np.array(img_small).reshape(-1, 3).astype(np.int32)
-    # Bit-pack RGB into a single int to speed up np.unique
-    packed = (pixels[:, 0] << 16) | (pixels[:, 1] << 8) | pixels[:, 2]
-    unique_colors = len(np.unique(packed))
-    variety_ratio = unique_colors / 4096.0
-    
-    # 2. Grey Dominance Check (UI/Screenshots are often mostly grey/white/black)
-    # Check standard deviation between R, G, B channels
-    channel_std = np.mean(np.std(pixels, axis=1))
-    # If channel_std is low, the pixel is "grey-ish"
-    is_grey_dominant = np.mean(np.std(pixels, axis=1) < 15.0) > 0.6 # >60% of pixels are grey
-
-    # 3. Edge Analysis (Flatness)
-    diff_x = np.mean(np.abs(np.diff(pixels.reshape(64,64,3), axis=1)))
-    diff_y = np.mean(np.abs(np.diff(pixels.reshape(64,64,3), axis=0)))
-    flatness = diff_x + diff_y
-
-    relevance_score = 1.0
-    # Thresholds: Nature usually has variety_ratio > 0.4 and is NOT grey dominant
-    if variety_ratio < 0.40: relevance_score *= 0.5 # Stricter
-    if is_grey_dominant: relevance_score *= 0.4
-    if flatness < 60.0: relevance_score *= 0.3 # Significantly stricter flatness/entropy check
-
-    # 4. Text/UI Detection (Sharp horizontal/vertical lines)
-    # Most nature images don't have perfect 1px horizontal lines across large areas
-    if variety_ratio < 0.25 and flatness < 100.0: relevance_score *= 0.2
-
-
-    # Color Diagnostics (Existing water check)
-    pixels_tiny = np.array(img.resize((32, 32)))
-    avg_color = np.mean(pixels_tiny, axis=(0, 1))
-    r, g, b = avg_color[0], avg_color[1], avg_color[2]
-    is_murky = (r < 110 and g < 110 and b < 100)
-    is_tinted = (g > b + 15) or (r > b + 15)
-    
-    bonus = 0.45 if (is_murky or is_tinted) and relevance_score > 0.5 else 0.0
-    
-    return relevance_score, bonus
-
+def encode_image(image_bytes):
+    return base64.b64encode(image_bytes).decode('utf-8')
 
 def predict_image(image_bytes, demo_mode=True, description=""):
-
     """
-    Hybrid Inference using PyTorch + Color Heuristics.
+    Inference using Groq Llama 3.2 Vision Model.
+    Provides better accuracy and detailed pollution analysis.
     """
     try:
-        # Load Image
-        img = Image.open(io.BytesIO(image_bytes))
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-            
-        # Optimization: Downsample very large images immediately to speed up all subsequent steps
-        # AI works on 224x224, so 1024 is more than enough for detail
-        if max(img.size) > 1024:
-            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-            
-        relevance, color_bonus = get_scene_relevance(img)
+        client = get_client()
+        base64_image = encode_image(image_bytes)
         
-        # If the image is clearly not nature/water, reject immediately
-        if relevance < 0.3:
-            logger.warning("Rejected non-nature / synthetic image.")
-            return {"class": "invalid_image", "confidence": 0.0, "reason": "non_nature_scene"}
-
-        model = get_model()
+        prompt = f"""
+        Analyze this image for water pollution and environmental issues.
+        Context from user: "{description}"
         
-        input_tensor = _preprocess(img)
-        input_batch = input_tensor.unsqueeze(0)
+        Mandatory Categories (choose the most accurate):
+        - 'plastic': visible plastic waste, bottles, nets
+        - 'oil_spill': oily sheen, dark sludge on water
+        - 'sewage': murky, brown/black water, visible drains
+        - 'algal_bloom': green/blue-green surface covering
+        - 'chemical_waste': unusual colors (neon, milky), foam
+        - 'clean': clear water, healthy aquatic life, no visible pollution
+        - 'invalid_image': NOT a water body/environmental scene (e.g., car, tree, person, indoors)
         
-        with torch.no_grad():
-            output = model(input_batch)
-            
-        probabilities = torch.nn.functional.softmax(output[0], dim=0)
-        top_prob, top_idx = torch.max(probabilities, 0)
-        top_prob = top_prob.item()
-        top_idx = top_idx.item()
+        Task:
+        1. Identify the primary type from the list above. DO NOT use 'unknown' unless absolutely impossible to identify.
+        2. Assign a confidence score (0.0 to 1.0).
+        3. provide a brief reason.
+        
+        Return the result ONLY as a JSON object:
+        {{
+            "class": "category_name",
+            "confidence": 0.95,
+            "reason": "..."
+        }}
+        """
 
-        final_class = "unknown"
-        final_conf = 0.0
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            model="meta-llama/llama-4-maverick-17b-128e-instruct",
+            # Note: response_format={"type": "json_object"} sometimes fails with vision on Groq
+            # We will rely on prompt enforcement and manual parsing if needed.
+        )
 
-        if _is_local:
-            # Use specific classes from trained model
-            final_class = _categories.get(top_idx, "unknown")
-            final_conf = top_prob * relevance # Scale by relevance
-            
-            # If it's 'clean', it's not a pollution report
-            if final_class == "clean":
-                final_conf = 0.05
+        response_content = chat_completion.choices[0].message.content
+        logger.debug(f"Raw Groq Response: {response_content}")
+        
+        # Robust JSON extraction (Llama 4 often wraps in markdown)
+        import re
+        json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group(0))
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse extracted JSON, falling back to heuristic parsing or failure.")
+                result = {} 
         else:
-            # Fallback to generic reasoning
-            desc_lower = description.lower() if description else ""
-            if "plastic" in desc_lower:
-                final_class = "plastic"
-                final_conf = (0.75 + color_bonus) * relevance
-            elif "oil" in desc_lower or "spill" in desc_lower:
-                final_class = "oil_spill"
-                final_conf = (0.80 + color_bonus) * relevance
-            elif "sewage" in desc_lower:
-                final_class = "sewage"
-                final_conf = (0.70 + color_bonus) * relevance
-            elif color_bonus > 0:
-                final_class = "sewage"
-                final_conf = (0.5 + color_bonus) * relevance
+            logger.warning("No JSON found in response")
+            result = {}
 
-        # Return results (clamped confidence)
+        
+        logger.info(f"Groq Inference Result: {result.get('class')} ({result.get('confidence')}) - Reason: {result.get('reason')}")
+        
         return {
-            "class": final_class if final_conf > 0.2 else "unknown",
-            "confidence": min(0.98, final_conf)
+            "class": result.get("class", "unknown"),
+            "confidence": float(result.get("confidence", 0.0))
         }
 
-        
     except Exception as e:
-        logger.error(f"PyTorch Inference error: {e}", exc_info=True)
+        logger.error(f"Groq Inference error: {e}", exc_info=True)
         return {"class": "unknown", "confidence": 0.0}
+
+def get_shared_model():
+    """Maintained for compatibility with main.py pre-loading logic."""
+    logger.info("⚡ Groq Vision API Integration Initialized.")
+    return "GROQ_ACTIVE"

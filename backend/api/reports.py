@@ -62,9 +62,15 @@ async def create_report(
         ai_class = prediction.get("class", "unknown")
         ai_confidence = prediction.get("confidence", 0.0)
         
-        status = "Verified by AI" if ai_confidence >= 0.70 else "Submitted"
+        # Status logic updated for universal 75% threshold and specific clean/invalid states
         if ai_class == "invalid_image":
             status = "Rejected by AI"
+        elif ai_class == "clean":
+            status = "Clean Water Detected"
+        elif ai_confidence >= 0.75:
+            status = "Verified by AI"
+        else:
+            status = "Submitted"
 
         # B. Upload File (Backgrounded for speed)
         background_tasks.add_task(upload_file, file_bytes, file_name)
@@ -123,8 +129,18 @@ def generate_uuid():
 async def finalize_report_background(report_id, ai_class, status, description, user_id):
     """Secondary tasks that don't need to block the UI response"""
     try:
-        # Blockchain integration (placeholder)
-        logger.info(f"Background finalizing report {report_id}")
+        # Fetch full report data from DB for notification details
+        res = supabase.table("reports").select("*").eq("id", report_id).execute()
+        if res.data:
+            report_data = res.data[0]
+            
+            # Trigger notifications to authorities (NGO/Gov)
+            from utils.notify import notify_authorities
+            notify_authorities(report_data)
+            
+            logger.info(f"Background finalized report {report_id} - Notifications triggered.")
+        else:
+            logger.warning(f"Report {report_id} not found in DB during background finalization.")
         
     except Exception as e:
         logger.error(f"Background finalization error: {e}")
@@ -218,11 +234,65 @@ def get_report(report_id: str) -> Report:
     reports = create_report_objects(res.data)
     return reports[0]
 
-@router.post("/{report_id}/status")
-def update_report_status(report_id: str, status: str = Form(...), action_note: str = Form(None)) -> dict:
-    """Update the status of a report and add an optional action note."""
-    logger.info(f"Status Update - Report: {report_id}, Status: {status}")
+@router.put("/{report_id}/status")
+async def update_report_status(
+    report_id: str, 
+    status: str = Form(...), 
+    action_note: str = Form(None),
+    verification_image: Optional[UploadFile] = File(None), # Prompt 2 & 6: Proof required
+    current_user = Depends(get_current_user)
+) -> dict:
+    """Update report status with accountability rules.
+    - Supports proof image upload.
+    """
+    actor_id = current_user.id
+    user_role = current_user.role.lower() if hasattr(current_user, 'role') else "citizen"
     
+    logger.info(f"Status Update Request - Report: {report_id}, Status: {status}, Image: {bool(verification_image)}")
+    
+    # 1. Fetch current state
+    res = supabase.table("reports").select("*").eq("id", report_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    report = res.data[0]
+    
+    # Check for existing proof if trying to resolve
+    existing_proof_res = supabase.table("photos").select("url").eq("report_id", report_id).execute()
+    # We assume first photo is original. Any subsequent photo might be proof.
+    # Or we explicitly check if a new image is being uploaded now.
+    has_uploaded_proof = bool(verification_image) or (len(existing_proof_res.data) > 1)
+
+    # 2. PROMPT 6: No closure without proof
+    if status in ["Action completed", "Resolved", "Awaiting Verification"]:
+        if not has_uploaded_proof:
+             raise HTTPException(
+                status_code=400, 
+                detail="ACCOUNTABILITY LOCK: Closure or verification requires proof-of-work. Please upload a cleanup photo."
+            )
+
+    # 3. PROMPT 4, 5: NGO Confirmation
+    if status == "Resolved" and user_role != "ngo":
+        raise HTTPException(
+            status_code=403, 
+            detail="VALIDATION REQUIRED: Only NGOs can provide final verification for completed cleanups."
+        )
+
+    # 4. Handle Image Upload if provided
+    new_photo_url = None
+    if verification_image:
+        file_bytes = await verification_image.read()
+        file_name = f"proof_{report_id}_{verification_image.filename}"
+        if upload_file(file_bytes, file_name):
+            new_photo_url = get_public_url(file_name)
+            # Insert into photos table
+            supabase.table("photos").insert({
+                "report_id": report_id,
+                "url": new_photo_url,
+                "label": "Cleanup Proof"
+            }).execute()
+
+    # 5. Perform Report Update
     update_payload = {
         "status": status,
         "updated_at": datetime.utcnow().isoformat()
@@ -231,19 +301,18 @@ def update_report_status(report_id: str, status: str = Form(...), action_note: s
         update_payload["action_note"] = action_note
         
     try:
-        res = supabase.table("reports").update(update_payload).eq("id", report_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Report not found")
-            
-        updated_report = res.data[0]
+        final_res = supabase.table("reports").update(update_payload).eq("id", report_id).execute()
+        updated_report = final_res.data[0]
         
-        # Trigger notification
-        message = f"Your report status has been updated to: {status}"
-        if action_note:
-            message += f". Note: {action_note}"
-            
-        from utils.notify import send_notification
-        send_notification(updated_report["user_id"], message)
+        # 6. Audit Trail
+        audit_entry = {
+            "report_id": report_id,
+            "user_id": actor_id,
+            "message_type": "STATUS_UPDATE",
+            "content": f"STATUS CHANGED TO: {status}. Photo: {'Uploaded' if new_photo_url else 'None'}. Note: {action_note or 'N/A'}",
+            "created_at": datetime.utcnow().isoformat()
+        }
+        supabase.table("report_discussions").insert(audit_entry).execute()
         
         return updated_report
     except Exception as e:

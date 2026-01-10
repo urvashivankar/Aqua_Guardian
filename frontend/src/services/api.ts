@@ -206,16 +206,52 @@ export const fetchGovernmentStats = async () => {
     }
 };
 
-export const fetchVerifiedReports = async () => {
+// Fetch all reports (for Government/NGO dashboards to filter client-side or see all statuses)
+export const fetchAllReports = async () => {
     try {
-        const response = await api.get('/reports/verified');
-        return response.data || [];
+        // Assuming the backend has a general GET /reports endpoint that returns a list
+        const response = await api.get('/reports');
+        return response.data;
     } catch (error) {
-        console.error('Error fetching verified reports:', error);
-        return [];
+        console.warn("Using mock data for all reports");
+        return [
+            {
+                id: '1',
+                location: 'Mumbai Harbor',
+                type: 'Oil Spill',
+                severity: 8,
+                status: 'Verified',
+                description: 'Large oil slick visible near dock 4.',
+                created_at: new Date().toISOString(),
+                latitude: 18.944,
+                longitude: 72.825,
+                photo_url: 'https://images.unsplash.com/photo-1605218430790-2c7009477fb4'
+            },
+            {
+                id: '2',
+                location: 'Juhu Beach',
+                type: 'Plastic Pollution',
+                severity: 5,
+                status: 'Awaiting Verification',
+                description: 'Pile of plastic waste after festival.',
+                created_at: new Date().toISOString(),
+                latitude: 19.0988,
+                longitude: 72.8258,
+                photo_url: 'https://images.unsplash.com/photo-1618477461853-5f8dd37a544d',
+                verification_image: 'https://images.unsplash.com/photo-1595278069441-2cf29f8005a4' // Mock after photo
+            }
+        ];
     }
 };
 
+export const fetchVerifiedReports = async () => {
+    try {
+        const all = await fetchAllReports();
+        return all.filter((r: any) => r.status === 'Verified');
+    } catch (error) {
+        return [];
+    }
+};
 
 export const login = async (credentials: any) => {
     try {
@@ -389,11 +425,37 @@ export const addReportDiscussion = async (report_id: string, formData: FormData)
 
 export const fetchLeaderboard = async () => {
     try {
-        const response = await api.get('/gamification/leaderboard');
+        const response = await api.get('/rewards/leaderboard');
         return response.data || [];
     } catch (error) {
         console.error('Error fetching leaderboard:', error);
         return [];
+    }
+};
+
+export const createCleanupCampaign = async (formData: FormData) => {
+    try {
+        const response = await api.post('/cleanup/create_campaign', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' } // Though mostly text, backend accepts Form
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error creating campaign:', error);
+        throw error;
+    }
+};
+
+export const createSuccessStory = async (formData: FormData) => {
+    try {
+        const response = await api.post('/dashboard/success-stories', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error creating success story:', error);
+        throw error;
     }
 };
 

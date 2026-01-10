@@ -11,7 +11,6 @@ export interface User {
   role: UserRole;
   reportsSubmitted: number;
   cleanUpsJoined: number;
-  nftsAdopted: number;
   createdAt?: string;
   location?: string;
 }
@@ -112,17 +111,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchUserStats = async (userId: string) => {
     try {
-      const [reportsRes, cleanupsRes, adoptionsRes] = await Promise.all([
+      const [reportsRes, cleanupsRes] = await Promise.all([
         supabase.from('reports').select('id', { count: 'exact' }).eq('user_id', userId),
-        supabase.from('cleanup_participation').select('id', { count: 'exact' }).eq('user_id', userId),
-        supabase.from('adoptions').select('id', { count: 'exact' }).eq('user_id', userId)
+        supabase.from('cleanup_participation').select('id', { count: 'exact' }).eq('user_id', userId)
       ]);
 
       setUser(prev => prev ? ({
         ...prev,
         reportsSubmitted: reportsRes.count || 0,
         cleanUpsJoined: cleanupsRes.count || 0,
-        nftsAdopted: adoptionsRes.count || 0,
       }) : null);
     } catch (e) {
       console.warn("Stats fetch failed in background", e);

@@ -331,7 +331,7 @@ const Report = () => {
       const aiConfidence = responseData.ai_confidence;
       const status = responseData.status;
 
-      if (status === 'ai_rejected') {
+      if (status === 'Rejected by AI') {
         setAiResult({
           class: 'INVALID CONTENT',
           confidence: 0,
@@ -348,7 +348,7 @@ const Report = () => {
             variant: "destructive",
           });
           setIsSubmitting(false);
-        }, 2000);
+        }, 3000);
         return;
       }
 
@@ -367,7 +367,8 @@ const Report = () => {
           if (match) location = match[1];
 
           return {
-            id: r.id.substring(0, 8).toUpperCase(),
+            id: r.id, // KEEP FULL UUID
+            displayId: r.id.substring(0, 8).toUpperCase(), // Short identifier for UI only
             location: location,
             type: (r.ai_class || 'Unknown').replace('_', ' '),
             severity: severityLabel,
@@ -394,11 +395,22 @@ const Report = () => {
         setTimeout(() => {
           setVerificationState('idle');
           setAiResult(null);
+
+          let toastTitle = "Report Filed Successfully";
+          let toastDesc = "Your report has been received and is queued for manual review.";
+
+          if (status === 'Verified by AI') {
+            toastTitle = "Report Auto-Verified!";
+            toastDesc = "High AI confidence confirmed pollution. Report is now verified.";
+          } else if (status === 'Clean Water Detected') {
+            toastTitle = "Clean Water Detected!";
+            toastDesc = "The AI analyzed your photo and it looks healthy. Great job!";
+          }
+
           toast({
-            title: status === 'Verified by AI' ? "Report Auto-Verified!" : "Report Filed Successfully",
-            description: status === 'Verified by AI' ?
-              "High AI confidence confirmed pollution. Report is now verified." :
-              "Your report has been received and is queued for manual review.",
+            title: toastTitle,
+            description: toastDesc,
+            variant: status === 'Clean Water Detected' ? "default" : undefined
           });
 
           // Reset form
@@ -411,7 +423,7 @@ const Report = () => {
           });
           setSelectedFile(null);
           setIsSubmitting(false);
-        }, 2000);
+        }, 3000);
       } else {
         setVerificationState('idle');
         toast({
@@ -501,9 +513,16 @@ const Report = () => {
                   <div className="text-center space-y-4 w-full">
                     <div>
                       <h3 className="text-xl font-bold text-foreground">
-                        {aiResult?.status === 'verified' ? 'System Verified' : (aiResult?.status === 'rejected' ? 'AI REJECTED' : 'Manual Review Needed')}
+                        {aiResult?.status === 'Verified by AI' ? 'System Verified' :
+                          aiResult?.status === 'Rejected by AI' ? 'AI REJECTED' :
+                            aiResult?.status === 'Clean Water Detected' ? 'Clean Water' :
+                              `Processing: ${aiResult?.class?.replace('_', ' ')}`}
                       </h3>
-                      <p className="text-muted-foreground">{aiResult?.status === 'rejected' ? 'This is not a valid pollution photo' : `AI Confidence: ${((aiResult?.confidence || 0) * 100).toFixed(1)}%`}</p>
+                      <p className="text-muted-foreground">
+                        {aiResult?.status === 'Rejected by AI' ? 'This is not a valid pollution photo' :
+                          aiResult?.status === 'Clean Water Detected' ? 'The water looks unpolluted and healthy.' :
+                            `AI Confidence: ${((aiResult?.confidence || 0) * 100).toFixed(1)}%`}
+                      </p>
                     </div>
 
 
@@ -514,8 +533,9 @@ const Report = () => {
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
                         <div
-                          className={`${aiResult?.status === 'rejected' ? 'bg-red-500' : 'bg-ocean-primary'} h-2.5 rounded-full transition-all duration-1000`}
-                          style={{ width: `${aiResult?.status === 'rejected' ? 100 : (aiResult?.confidence || 0) * 100}%` }}
+                          className={`${aiResult?.status === 'Rejected by AI' ? 'bg-red-500' :
+                            aiResult?.status === 'Clean Water Detected' ? 'bg-green-500' : 'bg-ocean-primary'} h-2.5 rounded-full transition-all duration-1000`}
+                          style={{ width: `${aiResult?.status === 'Rejected by AI' ? 100 : (aiResult?.confidence || 0) * 100}%` }}
                         ></div>
                       </div>
                     </div>

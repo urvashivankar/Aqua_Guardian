@@ -5,7 +5,7 @@ Production-ready FastAPI application with security hardening.
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from api import auth, reports, cleanup, rewards, dashboard, adoption, discussions
+from api import auth, reports, cleanup, rewards, dashboard, discussions
 from ml.infer import get_shared_model
 from middleware.logging import logger
 import os
@@ -94,7 +94,6 @@ app.include_router(reports.router, prefix="/reports", tags=["Reports"])
 app.include_router(cleanup.router, prefix="/cleanup", tags=["Cleanup Events"])
 app.include_router(rewards.router, prefix="/rewards", tags=["Rewards & Gamification"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard & Analytics"])
-app.include_router(adoption.router, prefix="/adoption", tags=["Water Body Adoption"])
 app.include_router(discussions.router, prefix="/reports", tags=["Report Discussions"])
 app.include_router(gamification_router, prefix="/gamification", tags=["Gamification"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["Push Notifications"])

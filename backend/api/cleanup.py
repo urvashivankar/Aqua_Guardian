@@ -2,6 +2,7 @@ from db.supabase import supabase
 from utils.storage import upload_file, get_public_url
 from fastapi import Depends, APIRouter, Form, File, UploadFile, HTTPException
 from utils.auth_utils import get_current_user
+from datetime import datetime
 
 router = APIRouter()
 
@@ -12,44 +13,57 @@ def start_cleanup(
     current_user = Depends(get_current_user)
 ):
     actor_id = current_user.id
-    """Initialize a cleanup action for a verified report."""
+    user_role = current_user.role.lower() if hasattr(current_user, 'role') else "citizen"
+    
+    logger.info(f"Cleanup START Request - Report: {report_id}, Actor: {actor_id} ({user_role})")
     
     # 1. SAFETY FIREWALL: Check Report Severity
     try:
-        report_res = supabase.table("reports").select("severity").eq("id", report_id).single().execute()
-        if report_res.data:
-            severity = report_res.data.get("severity", 0)
-            
-            # If High/Critical (8-10) and NOT Gov -> BLOCK
-            # (Assuming user role is stored in metadata or we check DB)
-            # For speed, we check the passed-in jwt claims if available, or query user profile.
-            # Using current_user which usually has role.
-            
-            # Fetch user role from DB to be sure
-            user_profile = supabase.table("users").select("role").eq("id", actor_id).single().execute()
-            user_role = user_profile.data.get("role", "citizen").lower()
-            
-            if severity >= 8 and user_role != "government":
-                raise HTTPException(
-                    status_code=403, 
-                    detail="SAFETY PROTOCOL: High-severity incidents require HAZMAT clearance. Restricted to Government agencies only."
-                )
+        report_res = supabase.table("reports").select("severity").eq("id", report_id).execute()
+        if not report_res.data:
+             raise HTTPException(status_code=404, detail="Target report not found.")
+             
+        severity = report_res.data[0].get("severity", 0)
+        
+        # If High/Critical (8-10) and NOT Gov -> BLOCK
+        if severity >= 8 and user_role != "government":
+            raise HTTPException(
+                status_code=403, 
+                detail="SAFETY PROTOCOL: High-severity incidents require HAZMAT clearance. Restricted to Government agencies only."
+            )
     except HTTPException as he:
         raise he
     except Exception as e:
-        print(f"Firewall check failed: {e}")
-        # Fail safe? Or allow? Let's allow but log error, or fail safe. 
-        # Better key error handling ideally.
-        pass
+        logger.error(f"Firewall check failed: {e}")
+        # If we can't check severity, safely proceed or fail? Proceed for now but log.
 
-    res = supabase.table("cleanup_actions").upsert({
+    # 2. Upsert cleanup action
+    # We use report_id as a key to prevent multiple cleanup actions for the same report?
+    # Usually cleanup_actions has its own ID. Let's check if there's an existing one.
+    existing = supabase.table("cleanup_actions").select("id").eq("report_id", report_id).execute()
+    
+    cleanup_payload = {
         "report_id": report_id,
         "actor_id": actor_id,
-        "organization": organization,
+        "organization": organization or "Aqua Guardian Partner",
         "status": "in_progress",
-        "progress": 0
-    }).execute()
-    return res.data
+        "progress": 0,
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    
+    if existing.data:
+        res = supabase.table("cleanup_actions").update(cleanup_payload).eq("report_id", report_id).execute()
+    else:
+        cleanup_payload["created_at"] = datetime.utcnow().isoformat()
+        res = supabase.table("cleanup_actions").insert(cleanup_payload).execute()
+        
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Database failure while starting cleanup drive.")
+
+    # 3. Update report status to Resolution in Progress
+    supabase.table("reports").update({"status": "Resolution in Progress"}).eq("id", report_id).execute()
+
+    return res.data[0]
 
 @router.post("/{cleanup_id}/join")
 def join_cleanup(
@@ -127,6 +141,61 @@ async def update_cleanup(
             print(f"Cleanup NFT Minting failed: {e}")
 
     return res.data
+
+@router.post("/create_campaign")
+def create_campaign(
+    title: str = Form(...),
+    location: str = Form(...),
+    description: str = Form(...),
+    organization: str = Form(...),
+    date: str = Form(None),
+    current_user = Depends(get_current_user)
+):
+    actor_id = current_user.id
+    """Create a new cleanup campaign from scratch (implicitly creates a report)."""
+    
+    # 1. Create a placeholder Report
+    # We use a default image or placeholder if none provided.
+    report_data = {
+        # "location" and "type" are not in the DB schema for reports
+        "latitude": 0.0, 
+        "longitude": 0.0,
+        "severity": 1, # Low severity for planned events
+        "description": f"CAMPAIGN: {title} @ {location}. {description}",
+        "status": "Verified",
+        "user_id": actor_id,
+        "ai_class": "Cleanup Drive",
+        "ai_confidence": 1.0,
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    
+    import uuid
+    report_data["id"] = str(uuid.uuid4())
+    
+    rep_res = supabase.table("reports").insert(report_data).execute()
+    if not rep_res.data:
+        raise HTTPException(status_code=500, detail="Failed to create campaign base report.")
+        
+    report_id = rep_res.data[0]["id"]
+    
+    # Insert Placeholder Photo
+    photo_url = "https://images.unsplash.com/photo-1550989460-0adf9ea622e2?q=80&w=600&auto=format&fit=crop"
+    supabase.table("photos").insert({
+        "report_id": report_id,
+        "url": photo_url
+    }).execute()
+
+    # 2. Create Cleanup Action
+    res = supabase.table("cleanup_actions").insert({
+        "report_id": report_id,
+        "actor_id": actor_id,
+        "organization": organization,
+        "status": "in_progress",
+        "progress": 0
+    }).execute()
+    
+    return res.data[0]
 
 @router.get("/active")
 def get_active_cleanups():

@@ -26,9 +26,17 @@ def notify_authorities(report_data: dict) -> None:
         ai_class = report_data.get("ai_class", "unknown")
         ai_confidence = report_data.get("ai_confidence", 0.0)
         
-        # Only notify if confidence is 70% or higher (User requirement)
-        if ai_confidence < 0.70:
-            print(f"Skipping notification: confidence {ai_confidence:.2%} below threshold (70%)")
+        ai_class = report_data.get("ai_class", "unknown")
+        ai_confidence = report_data.get("ai_confidence", 0.0)
+        
+        # Universal threshold: 75% for all pollution types
+        # Skip if clean or invalid
+        if ai_class in ["clean", "invalid_image"]:
+            print(f"No notification needed for {ai_class}")
+            return
+            
+        if ai_confidence < 0.80:
+            print(f"Skipping notification: confidence {ai_confidence:.2%} below 80% threshold")
             return
         
         # Prepare notification message

@@ -15,6 +15,7 @@ interface LeaderboardUser {
     reports_verified: number;
     cleanups_completed: number;
     role: string;
+    points: number;
 }
 
 const Leaderboard = () => {

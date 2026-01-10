@@ -14,7 +14,6 @@ import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import Report from "./pages/Report";
 import Profile from "./pages/Profile";
-import NFTAdoption from "./pages/NFTAdoption";
 import MarineImpact from "./pages/MarineImpact";
 import SuccessStories from "./pages/SuccessStories";
 import HowToUse from "./pages/HowToUse";
@@ -47,7 +46,6 @@ const App = () => (
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/report" element={<Report />} />
                 <Route path="/profile" element={<Profile />} />
-                <Route path="/nft-adoption" element={<NFTAdoption />} />
                 <Route path="/marine-impact" element={<MarineImpact />} />
                 <Route path="/success-stories" element={<SuccessStories />} />
                 <Route path="/how-to-use" element={<HowToUse />} />

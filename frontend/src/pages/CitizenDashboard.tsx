@@ -1,11 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertTriangle, TrendingUp, Users, CheckCircle, Clock } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Users, CheckCircle, Clock, PieChart, BarChart } from 'lucide-react';
 import ReportsTimelineChart from '@/components/charts/ReportsTimelineChart';
+import PollutionTypeChart from '@/components/charts/PollutionTypeChart';
+import StatusPieChart from '@/components/charts/StatusPieChart';
+import SeverityChart from '@/components/charts/SeverityChart';
 import ModernKPICard from '@/components/charts/ModernKPICard';
-import { fetchDashboardStats, fetchReportsTimeline } from '@/services/api';
+import {
+    fetchDashboardStats,
+    fetchReportsTimeline,
+    fetchReportsByType,
+    fetchReportsByStatus,
+    fetchSeverityDistribution
+} from '@/services/api';
+import { useNavigate } from 'react-router-dom';
 
 const CitizenDashboard = () => {
+    const navigate = useNavigate();
     const [stats, setStats] = useState({
         total_reports: 0,
         active_users: 0,
@@ -14,27 +25,29 @@ const CitizenDashboard = () => {
         avg_response_time: 'N/A'
     });
     const [timelineData, setTimelineData] = useState<any[]>([]);
+    const [pollutionTypes, setPollutionTypes] = useState<any[]>([]);
+    const [statusData, setStatusData] = useState<any[]>([]);
+    const [severityData, setSeverityData] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         const loadData = async () => {
             try {
-                const [statsRes, timelineRes] = await Promise.all([
+                const [statsRes, timelineRes, typesRes, statusRes, severityRes] = await Promise.all([
                     fetchDashboardStats(),
                     fetchReportsTimeline(30),
+                    fetchReportsByType(),
+                    fetchReportsByStatus(),
+                    fetchSeverityDistribution()
                 ]);
 
                 if (statsRes) setStats(statsRes);
                 if (timelineRes) setTimelineData(timelineRes);
+                if (typesRes) setPollutionTypes(typesRes);
+                if (statusRes) setStatusData(statusRes);
+                if (severityRes) setSeverityData(severityRes);
             } catch (error) {
                 console.error("Failed to load Citizen dashboard data", error);
-                setStats({
-                    total_reports: 0,
-                    active_users: 0,
-                    resolved_reports: 0,
-                    verified_reports: 0,
-                    avg_response_time: 'N/A'
-                });
             } finally {
                 setIsLoading(false);
             }
@@ -94,7 +107,9 @@ const CitizenDashboard = () => {
                 />
             </div>
 
+            {/* Main Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Reports Timeline - Full Width on Mobile, Half on Desktop */}
                 <Card className="ocean-card">
                     <CardHeader>
                         <CardTitle className="flex items-center space-x-2">
@@ -105,22 +120,67 @@ const CitizenDashboard = () => {
                     </CardHeader>
                     <CardContent>
                         {isLoading ? (
-                            <div className="h-[200px] animate-pulse bg-muted/20" />
+                            <div className="h-[300px] animate-pulse bg-muted/20 rounded-lg" />
                         ) : (
                             <ReportsTimelineChart data={timelineData} />
                         )}
                     </CardContent>
                 </Card>
 
+                {/* Pollution Sources - Pie Chart */}
                 <Card className="ocean-card">
                     <CardHeader>
-                        <CardTitle>Your Impact</CardTitle>
-                        <CardDescription>Badges and Certificates earned</CardDescription>
+                        <CardTitle className="flex items-center space-x-2">
+                            <PieChart className="h-5 w-5 text-ocean-primary" />
+                            <span>Pollution Sources</span>
+                        </CardTitle>
+                        <CardDescription>Breakdown by pollution category</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-center p-8 bg-muted/10 rounded-xl border-dashed border-2 border-muted">
-                            <p className="text-muted-foreground">Log more reports to earn your first NFT Badge!</p>
-                        </div>
+                        {isLoading ? (
+                            <div className="h-[300px] animate-pulse bg-muted/20 rounded-lg" />
+                        ) : (
+                            <PollutionTypeChart data={pollutionTypes} />
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Secondary Charts Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Status Distribution - Donut Chart */}
+                <Card className="ocean-card">
+                    <CardHeader>
+                        <CardTitle className="flex items-center space-x-2">
+                            <CheckCircle className="h-5 w-5 text-success" />
+                            <span>Resolution Status</span>
+                        </CardTitle>
+                        <CardDescription>Current status of reported incidents</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? (
+                            <div className="h-[300px] animate-pulse bg-muted/20 rounded-lg" />
+                        ) : (
+                            <StatusPieChart data={statusData} />
+                        )}
+                    </CardContent>
+                </Card>
+
+                {/* Severity Distribution - Bar Chart */}
+                <Card className="ocean-card">
+                    <CardHeader>
+                        <CardTitle className="flex items-center space-x-2">
+                            <BarChart className="h-5 w-5 text-warning" />
+                            <span>Severity Distribution</span>
+                        </CardTitle>
+                        <CardDescription>Reports categorized by impact level</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? (
+                            <div className="h-[300px] animate-pulse bg-muted/20 rounded-lg" />
+                        ) : (
+                            <SeverityChart data={severityData} />
+                        )}
                     </CardContent>
                 </Card>
             </div>

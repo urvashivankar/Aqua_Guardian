@@ -3,11 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { MapPin, Users, CheckCircle, Clock, ArrowRight, ShieldCheck, UserCircle, PlusCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { MapPin, Users, CheckCircle, Clock, ArrowRight, ShieldCheck, UserCircle, PlusCircle, Megaphone } from 'lucide-react';
 import axios from 'axios';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { createCleanupCampaign } from '@/services/api';
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -34,6 +38,17 @@ const CommunityActivities = () => {
     const [joiningId, setJoiningId] = useState<string | null>(null);
     const { toast } = useToast();
 
+    // Create Program State
+    const [isCreating, setIsCreating] = useState(false);
+    const [showCreateDialog, setShowCreateDialog] = useState(false);
+    const [newProgram, setNewProgram] = useState({
+        title: "",
+        location: "",
+        description: "",
+        organization: "Green Earth Alliance",
+        date: ""
+    });
+
     useEffect(() => {
         fetchActivities();
     }, []);
@@ -44,9 +59,43 @@ const CommunityActivities = () => {
             setActivities(response.data);
         } catch (error) {
             console.error("Error fetching activities:", error);
-            toast({ title: "Connection Error", description: "Failed to load community activities.", variant: "destructive" });
+            // toast({ title: "Connection Error", description: "Failed to load community activities.", variant: "destructive" });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleCreateProgram = async () => {
+        if (!newProgram.title || !newProgram.location) {
+            toast({ title: "Missing Fields", description: "Please fill in title and location.", variant: "destructive" });
+            return;
+        }
+        setIsCreating(true);
+        try {
+            const formData = new FormData();
+            formData.append('title', newProgram.title);
+            formData.append('location', newProgram.location);
+            formData.append('description', newProgram.description || 'Community Cleanup Event');
+            formData.append('organization', newProgram.organization);
+
+            await createCleanupCampaign(formData);
+
+            toast({
+                title: "Program Launched! 🚀",
+                description: `"${newProgram.title}" is now active and visible to all citizens.`,
+            });
+            setShowCreateDialog(false);
+            setNewProgram({ title: "", location: "", description: "", organization: user?.name || "NGO Partner", date: "" });
+            fetchActivities();
+        } catch (error: any) {
+            console.error("Create Program Error:", error);
+            toast({
+                title: "Error",
+                description: error.response?.data?.detail || "Failed to create program. Please check your inputs.",
+                variant: "destructive"
+            });
+        } finally {
+            setIsCreating(false);
         }
     };
 
@@ -61,8 +110,6 @@ const CommunityActivities = () => {
         }
 
         setJoiningId(cleanupId);
-
-
 
         try {
             const { data: { session } } = await supabase.auth.getSession();
@@ -99,7 +146,7 @@ const CommunityActivities = () => {
 
     return (
         <div className="container mx-auto px-4 py-12">
-            <div className="text-center mb-12">
+            <div className="text-center mb-12 relative">
                 <Badge className="mb-4 bg-ocean-primary/10 text-ocean-primary border-ocean-primary/20">
                     Public Transparency Board
                 </Badge>
@@ -107,6 +154,18 @@ const CommunityActivities = () => {
                 <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
                     Track active cleanup operations where municipalities, NGOs, and citizens unite to restore our waterways.
                 </p>
+
+                {user?.role === 'NGO' && (
+                    <div className="mt-6">
+                        <Button
+                            className="wave-animation text-lg px-8 py-6 rounded-full shadow-2xl shadow-green-600/30 bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => setShowCreateDialog(true)}
+                        >
+                            <Megaphone className="mr-2 h-5 w-5" />
+                            Launch New Cleanup Program
+                        </Button>
+                    </div>
+                )}
             </div>
 
             {loading ? (
@@ -120,6 +179,11 @@ const CommunityActivities = () => {
                     <CardContent>
                         <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                         <p className="text-muted-foreground">No active cleanup operations at the moment.</p>
+                        {user?.role === 'NGO' && (
+                            <Button variant="link" onClick={() => setShowCreateDialog(true)}>
+                                Be the first to start one!
+                            </Button>
+                        )}
                     </CardContent>
                 </Card>
             ) : (
@@ -195,6 +259,59 @@ const CommunityActivities = () => {
                     ))}
                 </div>
             )}
+
+            {/* Create Program Dialog */}
+            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Launch New Cleanup Program</DialogTitle>
+                        <DialogDescription>Create a new community event. This will be visible to all citizens.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="title">Campaign Title</Label>
+                            <Input
+                                id="title"
+                                placeholder="e.g. Juhu Beach Mega Cleanup"
+                                value={newProgram.title}
+                                onChange={(e) => setNewProgram({ ...newProgram, title: e.target.value })}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="location">Location</Label>
+                            <Input
+                                id="location"
+                                placeholder="e.g. Versova Beach, Mumbai"
+                                value={newProgram.location}
+                                onChange={(e) => setNewProgram({ ...newProgram, location: e.target.value })}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="desc">Description & Goals</Label>
+                            <Input
+                                id="desc"
+                                placeholder="Targeting plastic waste removal..."
+                                value={newProgram.description}
+                                onChange={(e) => setNewProgram({ ...newProgram, description: e.target.value })}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="org">Organizer Name</Label>
+                            <Input
+                                id="org"
+                                value={newProgram.organization}
+                                onChange={(e) => setNewProgram({ ...newProgram, organization: e.target.value })}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
+                        <Button onClick={handleCreateProgram} disabled={isCreating} className="bg-green-600 hover:bg-green-700 text-white">
+                            {isCreating ? "Launching..." : "Launch Program"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Accountability Section */}
             <div className="mt-20 bg-ocean-primary/5 rounded-3xl p-12 border border-ocean-primary/10">

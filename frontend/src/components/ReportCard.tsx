@@ -8,7 +8,7 @@ export interface ReportCardProps {
   location: string;
   type: string;
   severity: 'Low' | 'Medium' | 'High' | 'Critical';
-  status: 'Pending' | 'Investigating' | 'Resolved';
+  status: string; // Allow dynamic statuses from backend
   description: string;
   reportedBy: string;
   date: string;
