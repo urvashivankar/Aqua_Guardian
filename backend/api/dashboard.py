@@ -367,10 +367,20 @@ def get_government_stats(current_user = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="Access denied. This endpoint is only for government users.")
             
         # Get jurisdiction for this government user
-        jurisdiction_res = supabase.table("government_jurisdictions")\
-            .select("id")\
             .eq("government_user_id", user_id)\
             .execute()
+        
+        # 🚨 DEMO OVERRIDE: If no jurisdiction linked, check for demo emails and link dynamically
+        if not jurisdiction_res.data:
+            email = getattr(current_user, "email", "")
+            if email in ["green@ngo.org", "vdr.manager@gmail.com", "ahm.manager@gmail.com"]:
+                target_city = "Ahmedabad" if "ahm" in email else "Vadodara"
+                logger.info(f"🚨 DEMO MODE: Overriding jurisdiction for {email} -> {target_city}")
+                
+                # Fetch jurisdiction by name (assuming seeded)
+                demo_jur = supabase.table("government_jurisdictions").select("id").ilike("name", f"%{target_city}%").execute()
+                if demo_jur.data:
+                    jurisdiction_res.data = [demo_jur.data[0]]
         
         if not jurisdiction_res.data:
             logger.warning(f"No jurisdiction found for government user {user_id}")
