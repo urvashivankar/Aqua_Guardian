@@ -133,12 +133,16 @@ npm install
 npm run dev
 ```
 
-### 4. Demo Data Setup
-Since this is a demo environment, you can instantly populate the dashboard with test data:
-1. Log in to the application.
-2. Navigate to `http://localhost:5173/setup-demo`
-3. Click **"Generate Demo Data"**.
-4. Return to Dashboard to see live metrics.
+### 4. Demo Credentials
+Use these accounts to explore the different user perspectives:
+
+| Role | Email | Password | Access |
+|------|-------|----------|--------|
+| **NGO (Admin)** | `green@ngo.org` | `Ngo@123` | Impact Dashboard, Action Center |
+| **Citizen** | `alex@citizen.com` | `Citizen@123` | Report Submission, Points |
+| **Government** | `vdr.manager@gmail.com` | `Govt@123` | Authority Dashboard (Vadodara) |
+
+> **Note:** For full government access during demos, logged-in NGOs can toggle "Authority Mode" via the developer console.
 
 ---
 
