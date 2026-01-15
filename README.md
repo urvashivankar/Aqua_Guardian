@@ -140,7 +140,7 @@ Use these accounts to explore the different user perspectives:
 |------|-------|----------|--------|
 | **NGO (Admin)** | `green@ngo.org` | `Ngo@123` | Impact Dashboard, Action Center |
 | **Citizen** | `alex@citizen.com` | `Citizen@123` | Report Submission, Points |
-| **Government** | `vdr.manager@gmail.com` | `Govt@123` | Authority Dashboard (Vadodara) |
+| **Government** | `ahm.manager@gmail.com` | `Govt@123` | Authority Dashboard (Ahmedabad) |
 
 > **Note:** For full government access during demos, logged-in NGOs can toggle "Authority Mode" via the developer console.
 
