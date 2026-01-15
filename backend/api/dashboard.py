@@ -367,6 +367,9 @@ def get_government_stats(current_user = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="Access denied. This endpoint is only for government users.")
             
         # Get jurisdiction for this government user
+        # Get jurisdiction for this government user
+        jurisdiction_res = supabase.table("government_jurisdictions")\
+            .select("id")\
             .eq("government_user_id", user_id)\
             .execute()
         
